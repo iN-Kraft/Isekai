@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use blockdev::get_devices;
+use blockdev::{get_devices, DeviceType};
 use crate::domain::errors::DiskError;
 use crate::domain::models::{Disk, Partition};
 use crate::domain::traits::DiskManager;
@@ -73,13 +73,35 @@ impl DiskManager for LinuxDiskManager {
         if let Some(children) = disk.children {
             for (p_index, child) in children.into_iter().filter(|c| c.is_partition()).enumerate() {
                 let size_gb = (child.size / 1024 / 1024 / 1024) as u32;
-                let mountpoint = child.active_mountpoints().first().map(|s| s.to_string());
+                let mut mountpoint = child.active_mountpoints().first().map(|s| s.to_string());
+                let mut file_system = "Unknown".to_string();
+
+                if mountpoint.is_none() {
+                    for descendant in child.descendants() {
+                        if descendant.device_type == DeviceType::Crypt || descendant.device_type == DeviceType::Lvm {
+                            file_system = if descendant.device_type == DeviceType::Crypt {
+                                "LUKS Encrypted".to_string()
+                            } else {
+                                "LVM Volume".to_string()
+                            };
+
+                            let desc_mounts = descendant.active_mountpoints();
+                            mountpoint = if desc_mounts.contains(&"/") {
+                                Some("/".to_string())
+                            } else {
+                                desc_mounts.first().map(|s| s.to_string())
+                            };
+
+                            if mountpoint.is_some() { break; }
+                        }
+                    }
+                }
 
                 partitions.push(Partition {
                     partition_num: p_index as u32 + 1,
                     drive_letter: mountpoint,
                     size_gb,
-                    file_system: "Unknown".to_string(),
+                    file_system,
                 });
             }
         }
