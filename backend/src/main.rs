@@ -1,39 +1,54 @@
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use domain::traits::DiskManager;
+use infrastructure::NativeDiskManager;
+
+pub mod domain;
+pub mod infrastructure;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("Isekai Daemon starting...");
+    println!("Project Isekai Daemon starting...");
 
-    let listener = TcpListener::bind("127.0.0.1:45454").await?;
-    println!("Listening on {}", listener.local_addr()?);
+    let disk_manager: Arc<dyn DiskManager> = Arc::new(NativeDiskManager::new());
 
-    loop {
-        let (mut socket, _) = listener.accept().await?;
-        println!("Connection received");
+    match disk_manager.get_disks().await {
+        Ok(disks) => {
+            println!("Disks found: {:?}\n", disks.len());
 
-        tokio::spawn(async move {
-            let mut buf = [0; 1024];
+            for disk in disks {
+                let sys_tag = if disk.is_system_drive { "[SYSTEM]" } else { "" };
+                println!(
+                    "Drive {} | Name: {:<15} | Size: {} GB {}",
+                    disk.disk_num,
+                    disk.name,
+                    disk.total_gb,
+                    sys_tag
+                );
 
-            loop {
-                let n = match socket.read(&mut buf).await {
-                    Ok(n) if n == 0 => return,
-                    Ok(n) => n,
-                    Err(e) => {
-                        eprintln!("Failed to read from socket; err = {:?}", e);
-                        return;
+                match disk_manager.get_partitions(disk.disk_num).await {
+                    Ok(partitions) => {
+                        for part in partitions {
+                            let mount = part.drive_letter.unwrap_or_else(|| "Unmounted".to_string());
+                            println!(
+                                "└─ Part {} | {:>4} GB | Mount: {}",
+                                part.partition_num, part.size_gb, mount
+                            )
+                        }
                     }
-                };
-
-                let received = String::from_utf8_lossy(&buf[0..n]);
-                println!("Received: {}", received);
-
-                let response = format!("{{\"status\": \"Rust successfully received: {}\"}}\n", received.trim());
-                if let Err(e) = socket.write_all(response.as_bytes()).await {
-                    eprintln!("Failed to write to socket; err = {:?}", e);
-                    return;
+                    Err(e) => {
+                        println!("└─ Error reading partitions: {}", e)
+                    }
                 }
+                println!()
             }
-        });
+            println!();
+        }
+        Err(err) => {
+            eprintln!("Error getting disks: {}\n", err);
+        }
     }
+
+    Ok(())
 }
