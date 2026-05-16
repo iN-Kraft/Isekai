@@ -4,11 +4,13 @@ coroutines = "1.11.0"
 kommons = "2.0.0"
 kotlin = "2.3.21"
 ktor = "3.5.0"
+serialization = "1.11.0"
 
 [libraries]
 adwaita-compose = { group = "dev.datlag.kommons", name = "adwaita-compose", version.ref = "kommons" }
 coroutines = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
 ktor = { group = "io.ktor", name = "ktor-network", version.ref = "ktor" }
+serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
 
 [plugins]
 compose = { id = "org.jetbrains.compose", version.ref = "compose" }

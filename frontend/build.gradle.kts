@@ -53,6 +53,7 @@ kotlin {
             implementation(libs.adwaita.compose)
             implementation(libs.coroutines)
             implementation(libs.ktor)
+            implementation(libs.serialization.json)
         }
     }
 }
