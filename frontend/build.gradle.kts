@@ -43,8 +43,41 @@ kotlin {
             }
         }
     }
-    linuxArm64()
-    mingwX64()
+    linuxArm64 {
+        binaries {
+            executable {
+                entryPoint = "dev.datlag.isekai.main"
+                linkerOpts(getGlibLibs(getPkgConfigCmd(), getArm64Sysroot()).get())
+            }
+        }
+    }
+    mingwX64 {
+        binaries {
+            executable {
+                entryPoint = "dev.datlag.isekai.main"
+                val mingwLibDir = providers.exec {
+                    commandLine("x86_64-w64-mingw32-pkg-config", "--variable=libdir", "libadwaita-1")
+                }.standardOutput.asText.map { it.trim() }.get()
+
+                // 2. Pass the absolute paths to the .dll.a import libraries!
+                // This completely prevents the LLVM linker from discovering the host's conflicting C-Runtime.
+                linkerOpts(
+                    "$mingwLibDir/libglib-2.0.dll.a",
+                    "$mingwLibDir/libgobject-2.0.dll.a",
+                    "$mingwLibDir/libgmodule-2.0.dll.a",
+                    "$mingwLibDir/libgio-2.0.dll.a",
+                    "$mingwLibDir/libgdk_pixbuf-2.0.dll.a",
+                    "$mingwLibDir/libharfbuzz.dll.a",
+                    "$mingwLibDir/libcairo.dll.a",
+                    "$mingwLibDir/libpango-1.0.dll.a",
+                    "$mingwLibDir/libpangocairo-1.0.dll.a",
+                    "$mingwLibDir/libgtk-4.dll.a",
+                    "$mingwLibDir/libgraphene-1.0.dll.a",
+                    "$mingwLibDir/libadwaita-1.dll.a"
+                )
+            }
+        }
+    }
 
     applyDefaultHierarchyTemplate()
 
