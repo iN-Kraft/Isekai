@@ -8,19 +8,19 @@ use crate::domain::traits::DiskManager;
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
-struct Win32DiskDrive {
-    Index: u32,
-    Model: String,
+struct MsftDisk {
+    Number: u32,
+    FriendlyName: Option<String>,
     Size: Option<u64>,
-    PNPDeviceID: String,
 }
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
-struct Win32DiskPartition {
-    DeviceID: String,
+struct MsftPartition {
+    DiskNumber: u32,
+    PartitionNumber: u32,
     Size: Option<u64>,
-    Type: Option<String>,
+    DriveLetter: Option<String>,
 }
 
 pub struct WindowsDiskManager {
@@ -36,13 +36,13 @@ impl WindowsDiskManager {
 #[async_trait]
 impl DiskManager for WindowsDiskManager {
     async fn get_disks(&self) -> Result<Vec<Disk>, DiskError> {
-        let wmi_disks = tokio::task::spawn_blocking(|| -> Result<Vec<Win32DiskDrive>, DiskError> {
-            let wmi_con = WMIConnection::new().map_err(|e| {
+        let wmi_disks = tokio::task::spawn_blocking(|| -> Result<Vec<MsftDisk>, DiskError> {
+            let wmi_con = WMIConnection::with_namespace_path("ROOT\\Microsoft\\Windows\\Storage").map_err(|e| {
                 DiskError::WmiError(format!("WMI Connection failed: {}", e))
             })?;
 
-            let results: Vec<Win32DiskDrive> = wmi_con
-                .raw_query("SELECT Index, Model, Size, PNPDeviceID FROM Win32_DiskDrive")
+            let results: Vec<MsftDisk> = wmi_con
+                .raw_query("SELECT Number, FriendlyName, Size FROM MSFT_Disk")
                 .map_err(|e| DiskError::WmiError(format!("WMI Query failed: {}", e)))?;
 
             Ok(results)
@@ -54,43 +54,32 @@ impl DiskManager for WindowsDiskManager {
             let size_bytes = wmi_disk.Size.unwrap_or(0);
             let size_gb = (size_bytes / 1024 / 1024 / 1024) as u32;
 
-            if wmi_disk.PNPDeviceID.is_empty() {
-                continue;
-            }
-
             disks.push(Disk {
-                stable_id: wmi_disk.PNPDeviceID,
-                name: wmi_disk.Model,
+                stable_id: wmi_disk.Number.to_string(),
+                name: wmi_disk.FriendlyName.unwrap_or_else(|| "Unknown".to_string()),
                 total_gb: size_gb,
                 free_gb: 0,
                 is_system_drive: false,
             });
         }
 
+        disks.sort_by_key(|d| d.stable_id.parse::<u32>().unwrap_or(u32::MAX));
         Ok(disks)
     }
 
     async fn get_partitions(&self, disk_id: &str) -> Result<Vec<Partition>, DiskError> {
-        let disk_id_owned = disk_id.to_string();
+        let disk_index: u32 = disk_id.parse().map_err(|_| {
+            DiskError::DiskNotFound(disk_id.to_string())
+        })?;
 
-        let wmi_parts = tokio::task::spawn_blocking(move || -> Result<Vec<Win32DiskPartition>, DiskError> {
-            let wmi_con = WMIConnection::new().map_err(|e| {
+        let wmi_parts = tokio::task::spawn_blocking(move || -> Result<Vec<MsftPartition>, DiskError> {
+            let wmi_con = WMIConnection::with_namespace_path("ROOT\\Microsoft\\Windows\\Storage").map_err(|e| {
                 DiskError::WmiError(format!("WMI Connection failed: {}", e))
             })?;
 
-            // Resolve stable PNPDeviceID to volatile Index
-            let drives: Vec<Win32DiskDrive> = wmi_con
-                .raw_query("SELECT Index, PNPDeviceID FROM Win32_DiskDrive")
-                .map_err(|e| DiskError::WmiError(format!("WMI Query failed: {}", e)))?;
+            let query = format!("SELECT DiskNumber, PartitionNumber, Size, DriveLetter FROM MSFT_Partition WHERE DiskNumber = {}", disk_index);
 
-            let disk_index = match drives.into_iter().find(|d| d.PNPDeviceID == disk_id_owned) {
-                Some(d) => d.Index,
-                None => return Err(DiskError::DiskNotFound(disk_id_owned)),
-            };
-
-            let query = format!("SELECT DeviceID, Size, Type FROM Win32_DiskPartition WHERE DiskIndex = {}", disk_index);
-
-            let results: Vec<Win32DiskPartition> = wmi_con
+            let results: Vec<MsftPartition> = wmi_con
                 .raw_query(&query)
                 .map_err(|e| DiskError::WmiError(format!("WMI Query failed: {}", e)))?;
 
@@ -103,22 +92,67 @@ impl DiskManager for WindowsDiskManager {
             let size_bytes = part.Size.unwrap_or(0);
             let size_gb = (size_bytes / 1024 / 1024 / 1024) as u32;
 
-            if part.DeviceID.is_empty() {
-                continue;
+            let mut drive_letter = None;
+            if let Some(dl) = &part.DriveLetter {
+                let trimmed = dl.trim_matches('\0').trim();
+                if !trimmed.is_empty() {
+                    drive_letter = Some(format!("{}:", trimmed));
+                }
             }
 
             partitions.push(Partition {
-                uuid: part.DeviceID,
-                drive_letter: None, // Resolving "C:" requires querying Win32_LogicalDiskToPartition
+                id: part.PartitionNumber.to_string(),
+                drive_letter,
                 size_gb,
-                file_system: part.Type.unwrap_or_else(|| "Unknown".to_string()),
+                file_system: "Unknown".to_string(),
             });
         }
 
+        partitions.sort_by_key(|p| p.id.parse::<u32>().unwrap_or(u32::MAX));
         Ok(partitions)
     }
 
-    async fn shrink_partition(&self, _partition_uuid: &str, _target_size_gb: u32) -> Result<(), DiskError> {
-        Err(DiskError::DataValidation("Shrink not implemented on Windows".to_string()))
+    async fn shrink_partition(&self, disk_id: &str, partition_id: &str, target_size_gb: u32) -> Result<(), DiskError> {
+        let disk_num = disk_id.to_string();
+        let part_num = partition_id.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            // 2. Execute PowerShell
+            let cmd_str = format!("Resize-Partition -DiskNumber {} -PartitionNumber {} -Size {}GB", disk_num, part_num, target_size_gb);
+            
+            let output = std::process::Command::new("powershell.exe")
+                .args(["-NoProfile", "-NonInteractive", "-Command", &cmd_str])
+                .output()
+                .map_err(|e| DiskError::OsError(e))?;
+
+            // 3. Handle Errors
+            if !output.status.success() {
+                let stdout_err = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let stderr_err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                
+                let mut combined_err = String::new();
+                if !stdout_err.is_empty() {
+                    combined_err.push_str(&stdout_err);
+                }
+                if !stderr_err.is_empty() {
+                    if !combined_err.is_empty() {
+                        combined_err.push_str(" | ");
+                    }
+                    combined_err.push_str(&stderr_err);
+                }
+                if combined_err.is_empty() {
+                    combined_err = "Unknown error occurred".to_string();
+                }
+
+                return Err(DiskError::OsError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("PowerShell Resize-Partition failed: {}", combined_err),
+                )));
+            }
+
+            Ok(())
+        })
+        .await
+        .map_err(|e| DiskError::DataValidation(format!("Thread Pool crashed: {}", e)))?
     }
 }

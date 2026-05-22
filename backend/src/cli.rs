@@ -43,7 +43,7 @@ impl CliREPL {
                     println!("Available commands:");
                     println!("  list                          - List all physical disks");
                     println!("  parts <disk_id>               - List partitions on a specific disk");
-                    println!("  shrink <part_uuid> <gb>       - Shrink a partition to target GB (Stub)");
+                    println!("  shrink <disk_id> <part_id> <gb> - Shrink a partition to target GB");
                     println!("  exit | quit                   - Exit the CLI");
                 }
                 "list" => {
@@ -58,17 +58,18 @@ impl CliREPL {
                     }
                 }
                 "shrink" => {
+                    let disk_id = parts.next();
                     let part_id = parts.next();
                     let gb = parts.next();
 
-                    if let (Some(p_id), Some(gb_str)) = (part_id, gb) {
+                    if let (Some(d_id), Some(p_id), Some(gb_str)) = (disk_id, part_id, gb) {
                         if let Ok(gb_val) = gb_str.parse::<u32>() {
-                            self.handle_shrink(p_id, gb_val).await;
+                            self.handle_shrink(d_id, p_id, gb_val).await;
                         } else {
                             println!("Error: <gb> must be an integer.");
                         }
                     } else {
-                        println!("Usage: shrink <part_uuid> <gb>");
+                        println!("Usage: shrink <disk_id> <part_id> <gb>");
                     }
                 }
                 "exit" | "quit" => {
@@ -126,14 +127,14 @@ impl CliREPL {
                 }
                 println!("Partitions for disk: {}", disk_id);
                 println!("{:-<85}", "");
-                println!("{:<40} | {:<10} | {:<10} | {:<10}", "UUID", "Mount", "Size (GB)", "FS");
+                println!("{:<40} | {:<10} | {:<10} | {:<10}", "ID", "Mount", "Size (GB)", "FS");
                 println!("{:-<85}", "");
                 for part in partitions {
                     let mount = part.drive_letter.unwrap_or_else(|| "-".to_string());
-                    let truncated_uuid = if part.uuid.len() > 38 {
-                        format!("{}...", &part.uuid[..35])
+                    let truncated_uuid = if part.id.len() > 38 {
+                        format!("{}...", &part.id[..35])
                     } else {
-                        part.uuid.clone()
+                        part.id.clone()
                     };
 
                     println!("{:<40} | {:<10} | {:<10} | {:<10}", 
@@ -151,11 +152,11 @@ impl CliREPL {
         }
     }
 
-    async fn handle_shrink(&self, part_uuid: &str, target_size_gb: u32) {
-        println!("Attempting to shrink partition {} to {} GB...", part_uuid, target_size_gb);
+    async fn handle_shrink(&self, disk_id: &str, part_id: &str, target_size_gb: u32) {
+        println!("Attempting to shrink partition {} on disk {} to {} GB...", part_id, disk_id, target_size_gb);
         
-        match self.disk_manager.shrink_partition(part_uuid, target_size_gb).await {
-            Ok(_) => println!("Shrink operation completed successfully (stub)."),
+        match self.disk_manager.shrink_partition(disk_id, part_id, target_size_gb).await {
+            Ok(_) => println!("Shrink operation completed successfully."),
             Err(e) => eprintln!("Shrink operation failed: {}", e),
         }
     }

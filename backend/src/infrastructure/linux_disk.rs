@@ -193,7 +193,7 @@ impl DiskManager for LinuxDiskManager {
             };
 
             partitions.push(Partition {
-                uuid,
+                id: uuid,
                 drive_letter: child.active_mountpoints().first().map(|s| s.to_string()),
                 size_gb: (child.size / 1024 / 1024 / 1024) as u32,
                 file_system: child.fstype.clone().unwrap_or_else(|| "Unknown".to_string()),
@@ -203,8 +203,11 @@ impl DiskManager for LinuxDiskManager {
         Ok(partitions)
     }
 
-    async fn shrink_partition(&self, partition_uuid: &str, target_size_gb: u32) -> Result<(), DiskError> {
-        let uuid = partition_uuid.to_string();
+    async fn shrink_partition(&self, disk_id: &str, partition_id: &str, target_size_gb: u32) -> Result<(), DiskError> {
+        let d_id = disk_id.to_string();
+        let p_id = partition_id.to_string();
+
+        let debug_mode = self.debug_mode;
 
         tokio::task::spawn_blocking(move || {
             // 1. Identify Parent Disk, Child Device, & Start Sector via blockdev crate
@@ -222,9 +225,21 @@ impl DiskManager for LinuxDiskManager {
             let mut active_mounts: Vec<String> = Vec::new();
 
             for disk in devices.iter_all() {
+                let id = Self::get_stable_id(disk).unwrap_or_else(|| {
+                    if debug_mode && disk.device_type == DeviceType::Loop {
+                        disk.name.clone()
+                    } else {
+                        "".to_string()
+                    }
+                });
+                
+                if id != d_id {
+                    continue;
+                }
+
                 if let Some(children) = &disk.children {
                     for child in children {
-                        if child.uuid.as_deref() == Some(&uuid) {
+                        if child.uuid.as_deref() == Some(&p_id) {
                             parent_name = Some(disk.name.clone());
                             child_name = Some(child.name.clone());
                             partn = child.partn;
@@ -242,19 +257,19 @@ impl DiskManager for LinuxDiskManager {
             }
 
             let pkname = parent_name.ok_or_else(|| {
-                DiskError::PartitionNotFound(uuid.clone(), "Could not find partition in device tree".to_string())
+                DiskError::PartitionNotFound(p_id.clone(), format!("Could not find partition {} on disk {}", p_id, d_id))
             })?;
             let cname = child_name.ok_or_else(|| {
                 DiskError::DataValidation("Child partition name is missing".to_string())
             })?;
             let partn = partn.ok_or_else(|| {
-                DiskError::DataValidation(format!("Partition {} has no partn value", uuid))
+                DiskError::DataValidation(format!("Partition {} has no partn value", p_id))
             })?;
             let start_sector = start_sector.ok_or_else(|| {
-                DiskError::DataValidation(format!("Partition {} has no start sector", uuid))
+                DiskError::DataValidation(format!("Partition {} has no start sector", p_id))
             })?;
             let fstype = fstype.ok_or_else(|| {
-                DiskError::DataValidation(format!("Partition {} has no fstype value", uuid))
+                DiskError::DataValidation(format!("Partition {} has no fstype value", p_id))
             })?;
 
             let device_path = format!("/dev/{}", cname);
@@ -274,7 +289,7 @@ impl DiskManager for LinuxDiskManager {
                     if let Some(mount) = active_mounts.first() {
                         execute_strategy_cmd(&resize_args, &device_path, target_size_gb, mount)?;
                     } else {
-                        let guard = MountGuard::new(&device_path, &uuid)?;
+                        let guard = MountGuard::new(&device_path, &p_id)?;
                         execute_strategy_cmd(&resize_args, &device_path, target_size_gb, &guard.mountpoint)?;
                         // guard automatically unmounts and cleans up when dropped
                     }

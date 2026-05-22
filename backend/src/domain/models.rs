@@ -13,7 +13,7 @@ pub struct Disk {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all="camelCase")]
 pub struct Partition {
-    pub uuid: String,
+    pub id: String,
     pub drive_letter: Option<String>,
     pub size_gb: u32,
     pub file_system: String,
