@@ -365,6 +365,15 @@ pub struct BlockDevice {
     /// The filesystem type of the device.
     #[serde(rename = "fstype")]
     pub fstype: Option<String>,
+    /// The partition number.
+    #[serde(rename = "partn")]
+    pub partn: Option<u32>,
+    /// The starting sector of the partition.
+    #[serde(rename = "start")]
+    pub start: Option<u64>,
+    /// The logical sector size in bytes.
+    #[serde(rename = "log-sec")]
+    pub log_sec: Option<u64>,
     /// Whether the device is removable.
     pub rm: bool,
     /// The size of the block device in bytes.
@@ -626,7 +635,7 @@ pub fn get_devices() -> Result<BlockDevices, BlockDevError> {
         .arg("--json")
         .arg("--bytes")
         .arg("-o")
-        .arg("+UUID,WWN,SERIAL,FSTYPE")
+        .arg("+UUID,WWN,SERIAL,FSTYPE,PARTN,START,LOG-SEC")
         .output()?;
 
     if !output.status.success() {

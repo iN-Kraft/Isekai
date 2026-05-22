@@ -108,25 +108,51 @@ impl DiskManager for LinuxDiskManager {
         let uuid = partition_uuid.to_string();
 
         tokio::task::spawn_blocking(move || {
-            // 1. Resolve UUID to Device Path using blkid
-            let output = std::process::Command::new("blkid")
-                .arg("-U")
-                .arg(&uuid)
-                .output()
-                .map_err(|e| DiskError::OsError(e))?;
+            // 1. Identify Parent Disk, Child Device, & Start Sector via blockdev crate
+            let devices = get_devices().map_err(|e| DiskError::OsError(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )))?;
 
-            if !output.status.success() {
-                let err_msg = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                return Err(DiskError::OsError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("blkid failed for UUID {}: {}", uuid, err_msg),
-                )));
+            let mut parent_name = None;
+            let mut child_name = None;
+            let mut partn = None;
+            let mut start_sector = None;
+            let mut logical_sector_size = 512;
+
+            for disk in devices.iter_all() {
+                if let Some(children) = &disk.children {
+                    for child in children {
+                        if child.uuid.as_deref() == Some(&uuid) {
+                            parent_name = Some(disk.name.clone());
+                            child_name = Some(child.name.clone());
+                            partn = child.partn;
+                            start_sector = child.start;
+                            logical_sector_size = disk.log_sec.unwrap_or(512);
+                            break;
+                        }
+                    }
+                }
+                if parent_name.is_some() {
+                    break;
+                }
             }
 
-            let device_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if device_path.is_empty() {
-                return Err(DiskError::PartitionNotFound(uuid, "Unknown (Resolved via blkid)".to_string()));
-            }
+            let pkname = parent_name.ok_or_else(|| {
+                DiskError::PartitionNotFound(uuid.clone(), "Could not find partition in device tree".to_string())
+            })?;
+            let cname = child_name.ok_or_else(|| {
+                DiskError::DataValidation("Child partition name is missing".to_string())
+            })?;
+            let partn = partn.ok_or_else(|| {
+                DiskError::DataValidation(format!("Partition {} has no partn value", uuid))
+            })?;
+            let start_sector = start_sector.ok_or_else(|| {
+                DiskError::DataValidation(format!("Partition {} has no start sector", uuid))
+            })?;
+
+            let device_path = format!("/dev/{}", cname);
+            let parent_disk = format!("/dev/{}", pkname);
 
             // 2. Filesystem Check (Required before resizing ext4)
             // -f forces check even if clean, -p auto-repairs safe errors
@@ -159,6 +185,55 @@ impl DiskManager for LinuxDiskManager {
                 return Err(DiskError::OsError(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     format!("resize2fs failed for {}: {}", device_path, err_msg),
+                )));
+            }
+
+            // 4. Calculate the Safe End Sector
+            let target_sectors = (target_size_gb as u64) * 1024 * 1024 * 1024 / logical_sector_size;
+            let safety_buffer_sectors = (100 * 1024 * 1024) / logical_sector_size; // 100 MiB safety buffer
+            let end_sector = start_sector + target_sectors + safety_buffer_sectors;
+
+            // 5. Shrink the Boundary
+            use std::io::Write;
+            let mut parted_cmd = std::process::Command::new("parted");
+            parted_cmd.arg("---pretend-input-tty")
+                .arg(&parent_disk)
+                .arg("resizepart")
+                .arg(partn.to_string())
+                .arg(format!("{}s", end_sector))
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped());
+
+            let mut child = parted_cmd.spawn()
+                .map_err(|e| DiskError::OsError(e))?;
+
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin.write_all(b"yes\n").map_err(|e| DiskError::OsError(e))?;
+            }
+
+            let parted_output = child.wait_with_output()
+                .map_err(|e| DiskError::OsError(e))?;
+
+            if !parted_output.status.success() {
+                let err_msg = String::from_utf8_lossy(&parted_output.stderr).trim().to_string();
+                return Err(DiskError::OsError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("parted failed for {}: {}", parent_disk, err_msg),
+                )));
+            }
+
+            // 6. Flush to Kernel
+            let partprobe_output = std::process::Command::new("partprobe")
+                .arg(&parent_disk)
+                .output()
+                .map_err(|e| DiskError::OsError(e))?;
+
+            if !partprobe_output.status.success() {
+                let err_msg = String::from_utf8_lossy(&partprobe_output.stderr).trim().to_string();
+                return Err(DiskError::OsError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("partprobe failed for {}: {}", parent_disk, err_msg),
                 )));
             }
 
