@@ -23,11 +23,13 @@ struct Win32DiskPartition {
     Type: Option<String>,
 }
 
-pub struct WindowsDiskManager;
+pub struct WindowsDiskManager {
+    _debug_mode: bool,
+}
 
 impl WindowsDiskManager {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(debug_mode: bool) -> Self {
+        Self { _debug_mode: debug_mode }
     }
 }
 

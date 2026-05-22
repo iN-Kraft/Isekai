@@ -2,13 +2,15 @@ use async_trait::async_trait;
 use crate::domain::errors::DiskError;
 use crate::domain::models::{Disk, Partition};
 use crate::domain::traits::DiskManager;
-use crate::infrastructure::blockdev::{get_devices, BlockDevice};
+use crate::infrastructure::blockdev::{get_devices, BlockDevice, DeviceType};
 
-pub struct LinuxDiskManager;
+pub struct LinuxDiskManager {
+    debug_mode: bool,
+}
 
 impl LinuxDiskManager {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(debug_mode: bool) -> Self {
+        Self { debug_mode }
     }
 
     fn get_stable_id(device: &BlockDevice) -> Option<String> {
@@ -31,12 +33,15 @@ impl DiskManager for LinuxDiskManager {
         let mut disks = Vec::new();
 
         for device in block_devices.iter() {
-            if !device.is_disk() {
+            let is_allowed_type = device.is_disk() || (self.debug_mode && device.device_type == DeviceType::Loop);
+            
+            if !is_allowed_type {
                 continue;
             }
 
             let stable_id = match Self::get_stable_id(device) {
                 Some(id) => id,
+                None if self.debug_mode && device.device_type == DeviceType::Loop => device.name.clone(),
                 None => continue, // Skip devices without a stable ID
             };
 
@@ -63,8 +68,17 @@ impl DiskManager for LinuxDiskManager {
         }).await.map_err(|e| DiskError::DataValidation(format!("Thread Pool crashed: {}", e)))??;
 
         let target_device = block_devices.iter_all()
-            .filter(|d| d.is_disk())
-            .find(|d| Self::get_stable_id(d).as_deref() == Some(&disk_id_owned))
+            .filter(|d| d.is_disk() || (self.debug_mode && d.device_type == DeviceType::Loop))
+            .find(|d| {
+                let id = Self::get_stable_id(d).unwrap_or_else(|| {
+                    if d.device_type == DeviceType::Loop {
+                        d.name.clone()
+                    } else {
+                        "".to_string()
+                    }
+                });
+                id == disk_id_owned
+            })
             .ok_or_else(|| DiskError::DiskNotFound(disk_id_owned))?;
 
         let mut partitions = Vec::new();
