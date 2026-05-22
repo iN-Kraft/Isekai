@@ -104,7 +104,67 @@ impl DiskManager for LinuxDiskManager {
         Ok(partitions)
     }
 
-    async fn shrink_partition(&self, _partition_uuid: &str, _target_size_gb: u32) -> Result<(), DiskError> {
-        Err(DiskError::DataValidation("Shrink not implemented".to_string()))
+    async fn shrink_partition(&self, partition_uuid: &str, target_size_gb: u32) -> Result<(), DiskError> {
+        let uuid = partition_uuid.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            // 1. Resolve UUID to Device Path using blkid
+            let output = std::process::Command::new("blkid")
+                .arg("-U")
+                .arg(&uuid)
+                .output()
+                .map_err(|e| DiskError::OsError(e))?;
+
+            if !output.status.success() {
+                let err_msg = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                return Err(DiskError::OsError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("blkid failed for UUID {}: {}", uuid, err_msg),
+                )));
+            }
+
+            let device_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if device_path.is_empty() {
+                return Err(DiskError::PartitionNotFound(uuid, "Unknown (Resolved via blkid)".to_string()));
+            }
+
+            // 2. Filesystem Check (Required before resizing ext4)
+            // -f forces check even if clean, -p auto-repairs safe errors
+            let check_output = std::process::Command::new("e2fsck")
+                .arg("-f")
+                .arg("-p")
+                .arg(&device_path)
+                .output()
+                .map_err(|e| DiskError::OsError(e))?;
+
+            // e2fsck exit codes: 0 (No errors), 1 (Errors corrected), 2 (System should be rebooted)
+            // We accept 0 and 1.
+            if !check_output.status.success() && check_output.status.code() != Some(1) {
+                let err_msg = String::from_utf8_lossy(&check_output.stderr).trim().to_string();
+                return Err(DiskError::OsError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("e2fsck failed for {}: {}", device_path, err_msg),
+                )));
+            }
+
+            // 3. Filesystem Shrink using resize2fs
+            let resize_output = std::process::Command::new("resize2fs")
+                .arg(&device_path)
+                .arg(format!("{}G", target_size_gb))
+                .output()
+                .map_err(|e| DiskError::OsError(e))?;
+
+            if !resize_output.status.success() {
+                let err_msg = String::from_utf8_lossy(&resize_output.stderr).trim().to_string();
+                return Err(DiskError::OsError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("resize2fs failed for {}: {}", device_path, err_msg),
+                )));
+            }
+
+            Ok(())
+        })
+        .await
+        .map_err(|e| DiskError::DataValidation(format!("Thread Pool crashed: {}", e)))?
     }
 }

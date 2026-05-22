@@ -152,7 +152,6 @@ impl CliREPL {
     }
 
     async fn handle_shrink(&self, part_uuid: &str, target_size_gb: u32) {
-        println!("WARNING: Safety checks are pending. Shrink command is currently a stub.");
         println!("Attempting to shrink partition {} to {} GB...", part_uuid, target_size_gb);
         
         match self.disk_manager.shrink_partition(part_uuid, target_size_gb).await {
