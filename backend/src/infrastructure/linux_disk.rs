@@ -4,6 +4,105 @@ use crate::domain::models::{Disk, Partition};
 use crate::domain::traits::DiskManager;
 use crate::infrastructure::blockdev::{get_devices, BlockDevice, DeviceType};
 
+enum ShrinkStrategy {
+    Offline {
+        check_args: Vec<&'static str>,
+        resize_args: Vec<&'static str>,
+    },
+    Online {
+        resize_args: Vec<&'static str>,
+    },
+    Unsupported(String),
+}
+
+fn get_shrink_strategy(fstype: &str) -> ShrinkStrategy {
+    match fstype {
+        "ext2" | "ext3" | "ext4" => ShrinkStrategy::Offline {
+            check_args: vec!["e2fsck", "-f", "-p", "{dev}"],
+            resize_args: vec!["resize2fs", "{dev}", "{size}"],
+        },
+        "ntfs" => ShrinkStrategy::Offline {
+            check_args: vec!["ntfsresize", "-f", "-i", "{dev}"],
+            resize_args: vec!["ntfsresize", "-f", "-s", "{size}", "{dev}"],
+        },
+        "btrfs" => ShrinkStrategy::Online {
+            resize_args: vec!["btrfs", "filesystem", "resize", "{size}", "{mnt}"],
+        },
+        "xfs" | "zfs_member" => ShrinkStrategy::Unsupported(
+            "This filesystem fundamentally does not support shrinking.".to_string(),
+        ),
+        _ => ShrinkStrategy::Unsupported(
+            "Shrinking not yet implemented for this filesystem.".to_string(),
+        ),
+    }
+}
+
+fn execute_strategy_cmd(args: &[&'static str], dev: &str, size_gb: u32, mnt: &str) -> Result<(), DiskError> {
+    if args.is_empty() { return Ok(()); }
+    let cmd_name = args[0];
+    let mut cmd = std::process::Command::new(cmd_name);
+    for &arg in &args[1..] {
+        let processed_arg = arg
+            .replace("{dev}", dev)
+            .replace("{size}", &format!("{}G", size_gb))
+            .replace("{mnt}", mnt);
+        cmd.arg(processed_arg);
+    }
+    
+    let output = cmd.output().map_err(|e| DiskError::OsError(e))?;
+    if !output.status.success() {
+        let exit_code = output.status.code().unwrap_or(-1);
+        if cmd_name == "e2fsck" && exit_code == 1 {
+            // e2fsck corrected errors safely, acceptable exit code.
+        } else {
+            let err_msg = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(DiskError::OsError(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("{} failed for {}: {}", cmd_name, dev, err_msg),
+            )));
+        }
+    }
+    Ok(())
+}
+
+struct MountGuard {
+    pub mountpoint: String,
+    needs_unmount: bool,
+}
+
+impl MountGuard {
+    fn new(device_path: &str, uuid: &str) -> Result<Self, DiskError> {
+        let mountpoint = format!("/tmp/isekai_fs_{}", uuid);
+        std::fs::create_dir_all(&mountpoint).map_err(|e| DiskError::OsError(e))?;
+        
+        let output = std::process::Command::new("mount")
+            .arg(device_path)
+            .arg(&mountpoint)
+            .output()
+            .map_err(|e| DiskError::OsError(e))?;
+
+        if !output.status.success() {
+            let err_msg = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let _ = std::fs::remove_dir(&mountpoint);
+            return Err(DiskError::OsError(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("mount failed for {}: {}", device_path, err_msg),
+            )));
+        }
+
+        Ok(Self { mountpoint, needs_unmount: true })
+    }
+}
+
+impl Drop for MountGuard {
+    fn drop(&mut self) {
+        if self.needs_unmount {
+            let _ = std::process::Command::new("umount").arg(&self.mountpoint).output();
+            let _ = std::fs::remove_dir(&self.mountpoint);
+        }
+    }
+}
+
 pub struct LinuxDiskManager {
     debug_mode: bool,
 }
@@ -119,6 +218,8 @@ impl DiskManager for LinuxDiskManager {
             let mut partn = None;
             let mut start_sector = None;
             let mut logical_sector_size = 512;
+            let mut fstype = None;
+            let mut active_mounts: Vec<String> = Vec::new();
 
             for disk in devices.iter_all() {
                 if let Some(children) = &disk.children {
@@ -129,6 +230,8 @@ impl DiskManager for LinuxDiskManager {
                             partn = child.partn;
                             start_sector = child.start;
                             logical_sector_size = disk.log_sec.unwrap_or(512);
+                            fstype = child.fstype.clone();
+                            active_mounts = child.active_mountpoints().into_iter().map(|s| s.to_string()).collect();
                             break;
                         }
                     }
@@ -150,42 +253,32 @@ impl DiskManager for LinuxDiskManager {
             let start_sector = start_sector.ok_or_else(|| {
                 DiskError::DataValidation(format!("Partition {} has no start sector", uuid))
             })?;
+            let fstype = fstype.ok_or_else(|| {
+                DiskError::DataValidation(format!("Partition {} has no fstype value", uuid))
+            })?;
 
             let device_path = format!("/dev/{}", cname);
             let parent_disk = format!("/dev/{}", pkname);
 
-            // 2. Filesystem Check (Required before resizing ext4)
-            // -f forces check even if clean, -p auto-repairs safe errors
-            let check_output = std::process::Command::new("e2fsck")
-                .arg("-f")
-                .arg("-p")
-                .arg(&device_path)
-                .output()
-                .map_err(|e| DiskError::OsError(e))?;
-
-            // e2fsck exit codes: 0 (No errors), 1 (Errors corrected), 2 (System should be rebooted)
-            // We accept 0 and 1.
-            if !check_output.status.success() && check_output.status.code() != Some(1) {
-                let err_msg = String::from_utf8_lossy(&check_output.stderr).trim().to_string();
-                return Err(DiskError::OsError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("e2fsck failed for {}: {}", device_path, err_msg),
-                )));
-            }
-
-            // 3. Filesystem Shrink using resize2fs
-            let resize_output = std::process::Command::new("resize2fs")
-                .arg(&device_path)
-                .arg(format!("{}G", target_size_gb))
-                .output()
-                .map_err(|e| DiskError::OsError(e))?;
-
-            if !resize_output.status.success() {
-                let err_msg = String::from_utf8_lossy(&resize_output.stderr).trim().to_string();
-                return Err(DiskError::OsError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("resize2fs failed for {}: {}", device_path, err_msg),
-                )));
+            // 2 & 3. Filesystem Shrink using Strategy Pattern
+            let strategy = get_shrink_strategy(&fstype);
+            match strategy {
+                ShrinkStrategy::Unsupported(reason) => {
+                    return Err(DiskError::DataValidation(reason));
+                }
+                ShrinkStrategy::Offline { check_args, resize_args } => {
+                    execute_strategy_cmd(&check_args, &device_path, target_size_gb, "")?;
+                    execute_strategy_cmd(&resize_args, &device_path, target_size_gb, "")?;
+                }
+                ShrinkStrategy::Online { resize_args } => {
+                    if let Some(mount) = active_mounts.first() {
+                        execute_strategy_cmd(&resize_args, &device_path, target_size_gb, mount)?;
+                    } else {
+                        let guard = MountGuard::new(&device_path, &uuid)?;
+                        execute_strategy_cmd(&resize_args, &device_path, target_size_gb, &guard.mountpoint)?;
+                        // guard automatically unmounts and cleans up when dropped
+                    }
+                }
             }
 
             // 4. Calculate the Safe End Sector
@@ -209,7 +302,7 @@ impl DiskManager for LinuxDiskManager {
                 .map_err(|e| DiskError::OsError(e))?;
 
             if let Some(mut stdin) = child.stdin.take() {
-                stdin.write_all(b"yes\n").map_err(|e| DiskError::OsError(e))?;
+                let _ = stdin.write_all(b"yes\n");
             }
 
             let parted_output = child.wait_with_output()
