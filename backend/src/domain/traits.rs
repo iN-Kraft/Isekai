@@ -5,8 +5,8 @@ use crate::domain::models::{Disk, Partition};
 
 #[automock]
 #[async_trait]
-pub trait DiskManager: Send + Sync{
+pub trait DiskManager: Send + Sync {
     async fn get_disks(&self) -> Result<Vec<Disk>, DiskError>;
-    async fn get_partitions(&self, disk_num: u32) -> Result<Vec<Partition>, DiskError>;
-    async fn shrink_partition(&self, disk_num: &str, partition_num: u32, shrink_by_gb: u32) -> Result<(), DiskError>;
+    async fn get_partitions(&self, disk_id: &str) -> Result<Vec<Partition>, DiskError>;
+    async fn shrink_partition(&self, partition_uuid: &str, target_size_gb: u32) -> Result<(), DiskError>;
 }

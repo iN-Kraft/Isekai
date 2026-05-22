@@ -14,6 +14,15 @@ pub enum DiskError {
     #[error("Disk {0} was not found")]
     DiskNotFound(String),
 
+    #[error("Partition {0} was not found on disk {1}")]
+    PartitionNotFound(String, String),
+
     #[error("Underlying OS error: {0}")]
     OsError(#[from] std::io::Error),
+
+    #[error("Data validation failed: {0}")]
+    DataValidation(String),
+
+    #[error("WMI error: {0}")]
+    WmiError(String),
 }

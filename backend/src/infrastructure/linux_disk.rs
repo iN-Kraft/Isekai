@@ -1,8 +1,8 @@
 use async_trait::async_trait;
-use blockdev::{get_devices, DeviceType};
 use crate::domain::errors::DiskError;
 use crate::domain::models::{Disk, Partition};
 use crate::domain::traits::DiskManager;
+use crate::infrastructure::blockdev::{get_devices, BlockDevice};
 
 pub struct LinuxDiskManager;
 
@@ -10,106 +10,87 @@ impl LinuxDiskManager {
     pub fn new() -> Self {
         Self {}
     }
+
+    fn get_stable_id(device: &BlockDevice) -> Option<String> {
+        device.wwn.clone()
+            .or_else(|| device.serial.clone())
+            .or_else(|| device.uuid.clone())
+    }
 }
 
 #[async_trait]
 impl DiskManager for LinuxDiskManager {
     async fn get_disks(&self) -> Result<Vec<Disk>, DiskError> {
-        println!("Linux: Querying block devices...");
-
-        let devices = tokio::task::spawn_blocking(|| {
-            get_devices()
-        }).await.expect("Thread Pool crashed").map_err(|e| {
-            DiskError::OsError(std::io::Error::new(
+        let block_devices = tokio::task::spawn_blocking(|| {
+            get_devices().map_err(|e| DiskError::OsError(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("Blockdev failed: {:?}", e)
-            ))
-        })?;
+                e.to_string()
+            )))
+        }).await.map_err(|e| DiskError::DataValidation(format!("Thread Pool crashed: {}", e)))??;
 
-        let mut mapped_disks= Vec::new();
+        let mut disks = Vec::new();
 
-        for (index, device) in devices.into_iter().enumerate() {
-            let size_gb = (device.size / 1024 / 1024 / 1024) as u32;
+        for device in block_devices.iter() {
+            if !device.is_disk() {
+                continue;
+            }
 
-            mapped_disks.push(Disk {
-                disk_num: index as u32,
-                total_gb: size_gb,
-                free_gb: 0,
+            let stable_id = match Self::get_stable_id(device) {
+                Some(id) => id,
+                None => continue, // Skip devices without a stable ID
+            };
+
+            disks.push(Disk {
+                stable_id,
+                name: device.name.clone(),
+                total_gb: (device.size / 1024 / 1024 / 1024) as u32,
+                free_gb: 0, // Placeholder
                 is_system_drive: device.is_system(),
-                name: device.name,
             });
         }
 
-        Ok(mapped_disks)
+        Ok(disks)
     }
 
-    async fn get_partitions(&self, disk_num: u32) -> Result<Vec<Partition>, DiskError> {
-        println!("Linux: Querying partitions for disk {}...", disk_num);
-
+    async fn get_partitions(&self, disk_id: &str) -> Result<Vec<Partition>, DiskError> {
+        let disk_id_owned = disk_id.to_string();
+        
         let block_devices = tokio::task::spawn_blocking(|| {
-            get_devices()
-        }).await.expect("Thread Pool crashed").map_err(|e| {
-            DiskError::OsError(std::io::Error::new(
+            get_devices().map_err(|e| DiskError::OsError(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("Failed to parse lsblk: {:?}", e)
-            ))
-        })?;
+                e.to_string()
+            )))
+        }).await.map_err(|e| DiskError::DataValidation(format!("Thread Pool crashed: {}", e)))??;
 
-        let mut target_disk = None;
-        for (index, device) in block_devices.into_iter().enumerate() {
-            if device.is_disk() && index as u32 == disk_num {
-                target_disk = Some(device);
-                break;
-            }
-        }
-
-        let disk = match target_disk {
-            Some(d) => d,
-            None => return Err(DiskError::DiskNotFound(disk_num.to_string())),
-        };
+        let target_device = block_devices.iter_all()
+            .filter(|d| d.is_disk())
+            .find(|d| Self::get_stable_id(d).as_deref() == Some(&disk_id_owned))
+            .ok_or_else(|| DiskError::DiskNotFound(disk_id_owned))?;
 
         let mut partitions = Vec::new();
 
-        if let Some(children) = disk.children {
-            for (p_index, child) in children.into_iter().filter(|c| c.is_partition()).enumerate() {
-                let size_gb = (child.size / 1024 / 1024 / 1024) as u32;
-                let mut mountpoint = child.active_mountpoints().first().map(|s| s.to_string());
-                let mut file_system = "Unknown".to_string();
-
-                if mountpoint.is_none() {
-                    for descendant in child.descendants() {
-                        if descendant.device_type == DeviceType::Crypt || descendant.device_type == DeviceType::Lvm {
-                            file_system = if descendant.device_type == DeviceType::Crypt {
-                                "LUKS Encrypted".to_string()
-                            } else {
-                                "LVM Volume".to_string()
-                            };
-
-                            let desc_mounts = descendant.active_mountpoints();
-                            mountpoint = if desc_mounts.contains(&"/") {
-                                Some("/".to_string())
-                            } else {
-                                desc_mounts.first().map(|s| s.to_string())
-                            };
-
-                            if mountpoint.is_some() { break; }
-                        }
-                    }
-                }
-
-                partitions.push(Partition {
-                    partition_num: p_index as u32 + 1,
-                    drive_letter: mountpoint,
-                    size_gb,
-                    file_system,
-                });
+        for child in target_device.children_iter() {
+            if !child.is_partition() {
+                continue;
             }
+
+            let uuid = match &child.uuid {
+                Some(u) => u.clone(),
+                None => continue, // Skip partitions without UUID
+            };
+
+            partitions.push(Partition {
+                uuid,
+                drive_letter: child.active_mountpoints().first().map(|s| s.to_string()),
+                size_gb: (child.size / 1024 / 1024 / 1024) as u32,
+                file_system: child.fstype.clone().unwrap_or_else(|| "Unknown".to_string()),
+            });
         }
 
         Ok(partitions)
     }
 
-    async fn shrink_partition(&self, disk_num: &str, partition_num: u32, shrink_by_gb: u32) -> Result<(), DiskError> {
-        todo!("Implement blockdev partition shrinking")
+    async fn shrink_partition(&self, _partition_uuid: &str, _target_size_gb: u32) -> Result<(), DiskError> {
+        Err(DiskError::DataValidation("Shrink not implemented".to_string()))
     }
 }
