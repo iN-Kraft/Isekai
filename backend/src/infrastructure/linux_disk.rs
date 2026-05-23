@@ -97,7 +97,9 @@ impl MountGuard {
 impl Drop for MountGuard {
     fn drop(&mut self) {
         if self.needs_unmount {
-            let _ = std::process::Command::new("umount").arg(&self.mountpoint).output();
+            let _ = std::process::Command::new("umount")
+                .args(["-l", &self.mountpoint])
+                .output();
             let _ = std::fs::remove_dir(&self.mountpoint);
         }
     }
@@ -244,7 +246,7 @@ impl DiskManager for LinuxDiskManager {
                             child_name = Some(child.name.clone());
                             partn = child.partn;
                             start_sector = child.start;
-                            logical_sector_size = disk.log_sec.unwrap_or(512);
+                            logical_sector_size = disk.log_sec.filter(|&s| s > 0).unwrap_or(512);
                             fstype = child.fstype.clone();
                             active_mounts = child.active_mountpoints().into_iter().map(|s| s.to_string()).collect();
                             break;
@@ -318,6 +320,7 @@ impl DiskManager for LinuxDiskManager {
 
             if let Some(mut stdin) = child.stdin.take() {
                 let _ = stdin.write_all(b"yes\n");
+                // stdin is dropped here, sending EOF to parted and preventing deadlock.
             }
 
             let parted_output = child.wait_with_output()
