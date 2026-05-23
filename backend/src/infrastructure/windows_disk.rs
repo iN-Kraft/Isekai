@@ -145,46 +145,45 @@ impl DiskManager for WindowsDiskManager {
     }
 
     async fn shrink_partition(&self, disk_id: &str, partition_id: &str, target_size_gb: u32) -> Result<(), DiskError> {
-        let disk_num = disk_id.to_string();
-        let part_num = partition_id.to_string();
+        let cmd_str = format!("Resize-Partition -DiskNumber {} -PartitionNumber {} -Size {}GB", disk_id, partition_id, target_size_gb);
+        
+        let output_fut = tokio::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &cmd_str])
+            .output();
 
-        tokio::task::spawn_blocking(move || {
-            // 2. Execute PowerShell
-            let cmd_str = format!("Resize-Partition -DiskNumber {} -PartitionNumber {} -Size {}GB", disk_num, part_num, target_size_gb);
+        let output = tokio::time::timeout(std::time::Duration::from_secs(300), output_fut)
+            .await
+            .map_err(|_| DiskError::OsError(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Resize-Partition timed out after 5 minutes",
+            )))?
+            .map_err(DiskError::OsError)?;
+
+        // 3. Handle Errors
+        if !output.status.success() {
+            let stdout_err = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let stderr_err = String::from_utf8_lossy(&output.stderr).trim().to_string();
             
-            let output = std::process::Command::new("powershell.exe")
-                .args(["-NoProfile", "-NonInteractive", "-Command", &cmd_str])
-                .output()
-                .map_err(|e| DiskError::OsError(e))?;
-
-            // 3. Handle Errors
-            if !output.status.success() {
-                let stdout_err = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                let stderr_err = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                
-                let mut combined_err = String::new();
-                if !stdout_err.is_empty() {
-                    combined_err.push_str(&stdout_err);
+            let mut combined_err = String::new();
+            if !stdout_err.is_empty() {
+                combined_err.push_str(&stdout_err);
+            }
+            if !stderr_err.is_empty() {
+                if !combined_err.is_empty() {
+                    combined_err.push_str(" | ");
                 }
-                if !stderr_err.is_empty() {
-                    if !combined_err.is_empty() {
-                        combined_err.push_str(" | ");
-                    }
-                    combined_err.push_str(&stderr_err);
-                }
-                if combined_err.is_empty() {
-                    combined_err = "Unknown error occurred".to_string();
-                }
-
-                return Err(DiskError::OsError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("PowerShell Resize-Partition failed: {}", combined_err),
-                )));
+                combined_err.push_str(&stderr_err);
+            }
+            if combined_err.is_empty() {
+                combined_err = "Unknown error occurred".to_string();
             }
 
-            Ok(())
-        })
-        .await
-        .map_err(|e| DiskError::DataValidation(format!("Thread Pool crashed: {}", e)))?
+            return Err(DiskError::OsError(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("PowerShell Resize-Partition failed: {}", combined_err),
+            )));
+        }
+
+        Ok(())
     }
 }

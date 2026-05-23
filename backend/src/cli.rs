@@ -2,6 +2,46 @@ use std::io::Write;
 use std::sync::Arc;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
 use crate::domain::traits::DiskManager;
+use clap::{Parser, Subcommand};
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+pub struct IsekaiCli {
+    /// Enable debug mode (shows virtual drives/loops)
+    #[arg(short, long, global = true)]
+    pub debug: bool,
+
+    /// Enter interactive REPL mode
+    #[arg(short, long)]
+    pub cli: bool,
+
+    #[command(subcommand)]
+    pub command: Option<Commands>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+    /// List all available physical disks
+    List,
+    /// List partitions for a specific disk
+    Parts {
+        /// The Hardware ID of the disk
+        disk_id: String,
+    },
+    /// Shrink a partition on a disk
+    Shrink {
+        /// The Hardware ID of the disk
+        disk_id: String,
+        /// The ID of the partition
+        partition_id: String,
+        /// Target size in GB
+        target_size_gb: u32,
+    },
+    /// Exit the CLI
+    Exit,
+    /// Exit the CLI
+    Quit,
+}
 
 pub struct CliREPL {
     disk_manager: Arc<dyn DiskManager>,
@@ -10,6 +50,25 @@ pub struct CliREPL {
 impl CliREPL {
     pub fn new(disk_manager: Arc<dyn DiskManager>) -> Self {
         Self { disk_manager }
+    }
+
+    pub async fn handle_command(&self, command: Commands) -> bool {
+        match command {
+            Commands::List => {
+                self.handle_list().await;
+            }
+            Commands::Parts { disk_id } => {
+                self.handle_parts(&disk_id).await;
+            }
+            Commands::Shrink { disk_id, partition_id, target_size_gb } => {
+                self.handle_shrink(&disk_id, &partition_id, target_size_gb).await;
+            }
+            Commands::Exit | Commands::Quit => {
+                println!("Exiting CLI...");
+                return true;
+            }
+        }
+        false
     }
 
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -35,49 +94,30 @@ impl CliREPL {
                 continue;
             }
 
-            let mut parts = input.split_whitespace();
-            let command = parts.next().unwrap_or("");
+            let tokens = match shlex::split(input) {
+                Some(t) => t,
+                None => {
+                    println!("Error: Invalid quoting in input.");
+                    continue;
+                }
+            };
 
-            match command {
-                "help" => {
-                    println!("Available commands:");
-                    println!("  list                          - List all physical disks");
-                    println!("  parts <disk_id>               - List partitions on a specific disk");
-                    println!("  shrink <disk_id> <part_id> <gb> - Shrink a partition to target GB");
-                    println!("  exit | quit                   - Exit the CLI");
-                }
-                "list" => {
-                    self.handle_list().await;
-                }
-                "parts" => {
-                    let disk_id = parts.next();
-                    if let Some(id) = disk_id {
-                        self.handle_parts(id).await;
-                    } else {
-                        println!("Usage: parts <disk_id>");
-                    }
-                }
-                "shrink" => {
-                    let disk_id = parts.next();
-                    let part_id = parts.next();
-                    let gb = parts.next();
+            // We prepend a dummy executable name because clap expects it
+            let mut clap_args = vec!["isekai".to_string()];
+            clap_args.extend(tokens);
 
-                    if let (Some(d_id), Some(p_id), Some(gb_str)) = (disk_id, part_id, gb) {
-                        if let Ok(gb_val) = gb_str.parse::<u32>() {
-                            self.handle_shrink(d_id, p_id, gb_val).await;
-                        } else {
-                            println!("Error: <gb> must be an integer.");
+            match IsekaiCli::try_parse_from(clap_args) {
+                Ok(cli) => {
+                    if let Some(cmd) = cli.command {
+                        if self.handle_command(cmd).await {
+                            break;
                         }
                     } else {
-                        println!("Usage: shrink <disk_id> <part_id> <gb>");
+                        println!("No command provided. Type 'help' for usage.");
                     }
                 }
-                "exit" | "quit" => {
-                    println!("Exiting CLI...");
-                    break;
-                }
-                _ => {
-                    println!("Unknown command: '{}'. Type 'help' for usage.", command);
+                Err(e) => {
+                    println!("{}", e);
                 }
             }
         }

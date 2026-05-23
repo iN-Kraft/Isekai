@@ -37,10 +37,10 @@ fn get_shrink_strategy(fstype: &str) -> ShrinkStrategy {
     }
 }
 
-fn execute_strategy_cmd(args: &[&'static str], dev: &str, size_gb: u32, mnt: &str) -> Result<(), DiskError> {
+async fn execute_strategy_cmd(args: &[&'static str], dev: &str, size_gb: u32, mnt: &str) -> Result<(), DiskError> {
     if args.is_empty() { return Ok(()); }
     let cmd_name = args[0];
-    let mut cmd = std::process::Command::new(cmd_name);
+    let mut cmd = tokio::process::Command::new(cmd_name);
     for &arg in &args[1..] {
         let processed_arg = arg
             .replace("{dev}", dev)
@@ -49,7 +49,14 @@ fn execute_strategy_cmd(args: &[&'static str], dev: &str, size_gb: u32, mnt: &st
         cmd.arg(processed_arg);
     }
     
-    let output = cmd.output().map_err(|e| DiskError::OsError(e))?;
+    let output = tokio::time::timeout(std::time::Duration::from_secs(300), cmd.output())
+        .await
+        .map_err(|_| DiskError::OsError(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!("{} timed out after 5 minutes", cmd_name),
+        )))?
+        .map_err(DiskError::OsError)?;
+
     if !output.status.success() {
         let exit_code = output.status.code().unwrap_or(-1);
         if cmd_name == "e2fsck" && exit_code == 1 {
@@ -71,15 +78,22 @@ struct MountGuard {
 }
 
 impl MountGuard {
-    fn new(device_path: &str, uuid: &str) -> Result<Self, DiskError> {
+    async fn new(device_path: &str, uuid: &str) -> Result<Self, DiskError> {
         let mountpoint = format!("/tmp/isekai_fs_{}", uuid);
-        std::fs::create_dir_all(&mountpoint).map_err(|e| DiskError::OsError(e))?;
+        std::fs::create_dir_all(&mountpoint).map_err(DiskError::OsError)?;
         
-        let output = std::process::Command::new("mount")
-            .arg(device_path)
-            .arg(&mountpoint)
-            .output()
-            .map_err(|e| DiskError::OsError(e))?;
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(300),
+            tokio::process::Command::new("mount")
+                .arg(device_path)
+                .arg(&mountpoint)
+                .output()
+        ).await
+        .map_err(|_| DiskError::OsError(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "mount timed out after 5 minutes",
+        )))?
+        .map_err(DiskError::OsError)?;
 
         if !output.status.success() {
             let err_msg = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -208,149 +222,166 @@ impl DiskManager for LinuxDiskManager {
     async fn shrink_partition(&self, disk_id: &str, partition_id: &str, target_size_gb: u32) -> Result<(), DiskError> {
         let d_id = disk_id.to_string();
         let p_id = partition_id.to_string();
-
         let debug_mode = self.debug_mode;
 
-        tokio::task::spawn_blocking(move || {
-            // 1. Identify Parent Disk, Child Device, & Start Sector via blockdev crate
-            let devices = get_devices().map_err(|e| DiskError::OsError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )))?;
+        let p_id_for_closure = p_id.clone();
+        // 1. The Blocking Phase: Identify Parent Disk, Child Device, & Start Sector
+        let (device_path, parent_disk, fstype, active_mounts, start_sector, logical_sector_size, partn) = 
+            tokio::task::spawn_blocking(move || -> Result<_, DiskError> {
+                let devices = get_devices().map_err(|e| DiskError::OsError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )))?;
 
-            let mut parent_name = None;
-            let mut child_name = None;
-            let mut partn = None;
-            let mut start_sector = None;
-            let mut logical_sector_size = 512;
-            let mut fstype = None;
-            let mut active_mounts: Vec<String> = Vec::new();
+                let mut parent_name = None;
+                let mut child_name = None;
+                let mut partn = None;
+                let mut start_sector = None;
+                let mut logical_sector_size = 512;
+                let mut fstype = None;
+                let mut active_mounts: Vec<String> = Vec::new();
 
-            for disk in devices.iter_all() {
-                let id = Self::get_stable_id(disk).unwrap_or_else(|| {
-                    if debug_mode && disk.device_type == DeviceType::Loop {
-                        disk.name.clone()
-                    } else {
-                        "".to_string()
+                for disk in devices.iter_all() {
+                    let id = Self::get_stable_id(disk).unwrap_or_else(|| {
+                        if debug_mode && disk.device_type == DeviceType::Loop {
+                            disk.name.clone()
+                        } else {
+                            "".to_string()
+                        }
+                    });
+                    
+                    if id != d_id {
+                        continue;
                     }
-                });
-                
-                if id != d_id {
-                    continue;
-                }
 
-                if let Some(children) = &disk.children {
-                    for child in children {
-                        if child.uuid.as_deref() == Some(&p_id) {
-                            parent_name = Some(disk.name.clone());
-                            child_name = Some(child.name.clone());
-                            partn = child.partn;
-                            start_sector = child.start;
-                            logical_sector_size = disk.log_sec.filter(|&s| s > 0).unwrap_or(512);
-                            fstype = child.fstype.clone();
-                            active_mounts = child.active_mountpoints().into_iter().map(|s| s.to_string()).collect();
-                            break;
+                    if let Some(children) = &disk.children {
+                        for child in children {
+                            if child.uuid.as_deref() == Some(&p_id_for_closure) {
+                                parent_name = Some(disk.name.clone());
+                                child_name = Some(child.name.clone());
+                                partn = child.partn;
+                                start_sector = child.start;
+                                logical_sector_size = disk.log_sec.filter(|&s| s > 0).unwrap_or(512);
+                                fstype = child.fstype.clone();
+                                active_mounts = child.active_mountpoints().into_iter().map(|s| s.to_string()).collect();
+                                break;
+                            }
                         }
                     }
-                }
-                if parent_name.is_some() {
-                    break;
-                }
-            }
-
-            let pkname = parent_name.ok_or_else(|| {
-                DiskError::PartitionNotFound(p_id.clone(), format!("Could not find partition {} on disk {}", p_id, d_id))
-            })?;
-            let cname = child_name.ok_or_else(|| {
-                DiskError::DataValidation("Child partition name is missing".to_string())
-            })?;
-            let partn = partn.ok_or_else(|| {
-                DiskError::DataValidation(format!("Partition {} has no partn value", p_id))
-            })?;
-            let start_sector = start_sector.ok_or_else(|| {
-                DiskError::DataValidation(format!("Partition {} has no start sector", p_id))
-            })?;
-            let fstype = fstype.ok_or_else(|| {
-                DiskError::DataValidation(format!("Partition {} has no fstype value", p_id))
-            })?;
-
-            let device_path = format!("/dev/{}", cname);
-            let parent_disk = format!("/dev/{}", pkname);
-
-            // 2 & 3. Filesystem Shrink using Strategy Pattern
-            let strategy = get_shrink_strategy(&fstype);
-            match strategy {
-                ShrinkStrategy::Unsupported(reason) => {
-                    return Err(DiskError::DataValidation(reason));
-                }
-                ShrinkStrategy::Offline { check_args, resize_args } => {
-                    execute_strategy_cmd(&check_args, &device_path, target_size_gb, "")?;
-                    execute_strategy_cmd(&resize_args, &device_path, target_size_gb, "")?;
-                }
-                ShrinkStrategy::Online { resize_args } => {
-                    if let Some(mount) = active_mounts.first() {
-                        execute_strategy_cmd(&resize_args, &device_path, target_size_gb, mount)?;
-                    } else {
-                        let guard = MountGuard::new(&device_path, &p_id)?;
-                        execute_strategy_cmd(&resize_args, &device_path, target_size_gb, &guard.mountpoint)?;
-                        // guard automatically unmounts and cleans up when dropped
+                    if parent_name.is_some() {
+                        break;
                     }
                 }
+
+                let pkname = parent_name.ok_or_else(|| {
+                    DiskError::PartitionNotFound(p_id_for_closure.clone(), format!("Could not find partition {} on disk {}", p_id_for_closure, d_id))
+                })?;
+                let cname = child_name.ok_or_else(|| {
+                    DiskError::DataValidation("Child partition name is missing".to_string())
+                })?;
+                let partn = partn.ok_or_else(|| {
+                    DiskError::DataValidation(format!("Partition {} has no partn value", p_id_for_closure))
+                })?;
+                let start_sector = start_sector.ok_or_else(|| {
+                    DiskError::DataValidation(format!("Partition {} has no start sector", p_id_for_closure))
+                })?;
+                let fstype = fstype.ok_or_else(|| {
+                    DiskError::DataValidation(format!("Partition {} has no fstype value", p_id_for_closure))
+                })?;
+
+                Ok((
+                    format!("/dev/{}", cname),
+                    format!("/dev/{}", pkname),
+                    fstype,
+                    active_mounts,
+                    start_sector,
+                    logical_sector_size,
+                    partn
+                ))
+            })
+            .await
+            .map_err(|e| DiskError::DataValidation(format!("Thread Pool crashed: {}", e)))??;
+
+        // 2 & 3. The Async Phase: Filesystem Shrink using Strategy Pattern
+        let strategy = get_shrink_strategy(&fstype);
+        match strategy {
+            ShrinkStrategy::Unsupported(reason) => {
+                return Err(DiskError::DataValidation(reason));
             }
-
-            // 4. Calculate the Safe End Sector
-            let target_sectors = (target_size_gb as u64) * 1024 * 1024 * 1024 / logical_sector_size;
-            let safety_buffer_sectors = (100 * 1024 * 1024) / logical_sector_size; // 100 MiB safety buffer
-            let end_sector = start_sector + target_sectors + safety_buffer_sectors;
-
-            // 5. Shrink the Boundary
-            use std::io::Write;
-            let mut parted_cmd = std::process::Command::new("parted");
-            parted_cmd.arg("---pretend-input-tty")
-                .arg(&parent_disk)
-                .arg("resizepart")
-                .arg(partn.to_string())
-                .arg(format!("{}s", end_sector))
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped());
-
-            let mut child = parted_cmd.spawn()
-                .map_err(|e| DiskError::OsError(e))?;
-
-            if let Some(mut stdin) = child.stdin.take() {
-                let _ = stdin.write_all(b"yes\n");
-                // stdin is dropped here, sending EOF to parted and preventing deadlock.
+            ShrinkStrategy::Offline { check_args, resize_args } => {
+                execute_strategy_cmd(&check_args, &device_path, target_size_gb, "").await?;
+                execute_strategy_cmd(&resize_args, &device_path, target_size_gb, "").await?;
             }
-
-            let parted_output = child.wait_with_output()
-                .map_err(|e| DiskError::OsError(e))?;
-
-            if !parted_output.status.success() {
-                let err_msg = String::from_utf8_lossy(&parted_output.stderr).trim().to_string();
-                return Err(DiskError::OsError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("parted failed for {}: {}", parent_disk, err_msg),
-                )));
+            ShrinkStrategy::Online { resize_args } => {
+                if let Some(mount) = active_mounts.first() {
+                    execute_strategy_cmd(&resize_args, &device_path, target_size_gb, mount).await?;
+                } else {
+                    let guard = MountGuard::new(&device_path, &p_id).await?;
+                    execute_strategy_cmd(&resize_args, &device_path, target_size_gb, &guard.mountpoint).await?;
+                }
             }
+        }
 
-            // 6. Flush to Kernel
-            let partprobe_output = std::process::Command::new("partprobe")
+        // 4. Calculate the Safe End Sector
+        let target_sectors = (target_size_gb as u64) * 1024 * 1024 * 1024 / logical_sector_size;
+        let safety_buffer_sectors = (100 * 1024 * 1024) / logical_sector_size; // 100 MiB safety buffer
+        let end_sector = start_sector + target_sectors + safety_buffer_sectors;
+
+        // 5. Shrink the Boundary
+        use tokio::io::AsyncWriteExt;
+        let mut parted_cmd = tokio::process::Command::new("parted");
+        parted_cmd.arg("---pretend-input-tty")
+            .arg(&parent_disk)
+            .arg("resizepart")
+            .arg(partn.to_string())
+            .arg(format!("{}s", end_sector))
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        let mut child = parted_cmd.spawn().map_err(DiskError::OsError)?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(b"yes\n").await;
+        }
+
+        let parted_output = tokio::time::timeout(std::time::Duration::from_secs(300), child.wait_with_output())
+            .await
+            .map_err(|_| DiskError::OsError(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "parted timed out after 5 minutes",
+            )))?
+            .map_err(DiskError::OsError)?;
+
+        if !parted_output.status.success() {
+            let err_msg = String::from_utf8_lossy(&parted_output.stderr).trim().to_string();
+            return Err(DiskError::OsError(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("parted failed for {}: {}", parent_disk, err_msg),
+            )));
+        }
+
+        // 6. Flush to Kernel
+        let partprobe_output = tokio::time::timeout(
+            std::time::Duration::from_secs(300),
+            tokio::process::Command::new("partprobe")
                 .arg(&parent_disk)
                 .output()
-                .map_err(|e| DiskError::OsError(e))?;
+        ).await
+        .map_err(|_| DiskError::OsError(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "partprobe timed out after 5 minutes",
+        )))?
+        .map_err(DiskError::OsError)?;
 
-            if !partprobe_output.status.success() {
-                let err_msg = String::from_utf8_lossy(&partprobe_output.stderr).trim().to_string();
-                return Err(DiskError::OsError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("partprobe failed for {}: {}", parent_disk, err_msg),
-                )));
-            }
+        if !partprobe_output.status.success() {
+            let err_msg = String::from_utf8_lossy(&partprobe_output.stderr).trim().to_string();
+            return Err(DiskError::OsError(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("partprobe failed for {}: {}", parent_disk, err_msg),
+            )));
+        }
 
-            Ok(())
-        })
-        .await
-        .map_err(|e| DiskError::DataValidation(format!("Thread Pool crashed: {}", e)))?
+        Ok(())
     }
 }
