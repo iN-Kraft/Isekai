@@ -9,6 +9,8 @@ use rustyline::hint::Hinter;
 use rustyline::validate::Validator;
 use shlex::split;
 use tokio::task::block_in_place;
+use crate::domain::validation::ComponentStatus;
+use crate::infrastructure::NativeValidator;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -27,6 +29,8 @@ pub struct IsekaiCli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
+    /// Check if required system packages are available
+    Check,
     /// List all available physical disks
     List,
     /// List partitions for a specific disk
@@ -42,12 +46,6 @@ pub enum Commands {
         partition_id: String,
         /// Target size in GB
         target_size_gb: u32,
-    },
-    /// Generate shell completions
-    Completions {
-        /// The shell to generate completions for
-        #[arg(value_enum)]
-        shell: clap_complete::Shell,
     },
     /// Exit the CLI
     Exit,
@@ -68,7 +66,7 @@ impl Completer for IsekaiHelper {
         let tokens: Vec<&str> = line_until_cursor.split(' ').collect();
 
         if tokens.len() == 1 {
-            let cmds = ["list", "parts", "shrink", "exit", "quit", "help"];
+            let cmds = ["check", "list", "parts", "shrink", "exit", "quit", "help"];
             let word = tokens[0];
             for cmd in cmds {
                 if cmd.starts_with(word) {
@@ -138,6 +136,9 @@ impl CliREPL {
 
     pub async fn handle_command(&self, command: Commands) -> bool {
         match command {
+            Commands::Check => {
+                self.handle_check().await;
+            }
             Commands::List => {
                 self.handle_list().await;
             }
@@ -147,18 +148,42 @@ impl CliREPL {
             Commands::Shrink { disk_id, partition_id, target_size_gb } => {
                 self.handle_shrink(&disk_id, &partition_id, target_size_gb).await;
             }
-            Commands::Completions { shell } => {
-                use clap::CommandFactory;
-                let mut cmd = IsekaiCli::command();
-                let bin_name = cmd.get_name().to_string();
-                clap_complete::generate(shell, &mut cmd, bin_name, &mut std::io::stdout());
-            }
             Commands::Exit | Commands::Quit => {
                 println!("Exiting CLI...");
                 return true;
             }
         }
         false
+    }
+
+    pub async fn handle_check(&self) {
+        match NativeValidator::run_checks().await {
+            Ok(report) => {
+                println!("{:-<60}", "");
+                println!("{:<20} | {:<50} | {:<5}", "Component", "Status", "Crit");
+                println!("{:-<85}", "");
+                for comp in report.components {
+                    let mut status_str = match comp.status {
+                        ComponentStatus::Installed(path) => format!("✅ {}", path),
+                        ComponentStatus::Missing => "❌ Missing".to_string(),
+                    };
+
+                    if status_str.chars().count() > 48 {
+                        status_str = format!("{}...", status_str.chars().take(45).collect::<String>());
+                    }
+
+                    let crit_str = if comp.is_critical { "Yes" } else { "No" };
+                    println!("{:<20} | {:<50} | {:<5}", comp.name, status_str, crit_str);
+                }
+                println!("{:-<85}", "");
+                if report.is_ready {
+                    println!("System is READY for disk operations.");
+                } else {
+                    println!("System is NOT READY. Missing critical components.");
+                }
+            }
+            Err(err) => eprintln!("Failed to run checks: {}", err),
+        }
     }
 
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
