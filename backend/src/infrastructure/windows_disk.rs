@@ -13,6 +13,7 @@ struct MsftDisk {
     Size: Option<u64>,
     IsSystem: Option<bool>,
     IsBoot: Option<bool>,
+    BusType: Option<u16>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -25,12 +26,12 @@ struct MsftPartition {
 }
 
 pub struct WindowsDiskManager {
-    _debug_mode: bool,
+    debug_mode: bool,
 }
 
 impl WindowsDiskManager {
     pub fn new(debug_mode: bool) -> Self {
-        Self { _debug_mode: debug_mode }
+        Self { debug_mode }
     }
 }
 
@@ -43,7 +44,7 @@ impl DiskManager for WindowsDiskManager {
             })?;
 
             let results: Vec<MsftDisk> = wmi_con
-                .raw_query("SELECT Number, FriendlyName, Size, IsSystem, IsBoot FROM MSFT_Disk")
+                .raw_query("SELECT Number, FriendlyName, Size, IsSystem, IsBoot, BusType FROM MSFT_Disk")
                 .map_err(|e| DiskError::WmiError(format!("WMI Query failed: {}", e)))?;
 
             Ok(results)
@@ -52,13 +53,21 @@ impl DiskManager for WindowsDiskManager {
             let mut disks = Vec::with_capacity(wmi_disks.len());
 
             for wmi_disk in wmi_disks {
+            let bus_type = wmi_disk.BusType.unwrap_or(0);
+            let friendly_name = wmi_disk.FriendlyName.as_deref().unwrap_or("Unknown");
+            let is_virtual = bus_type == 14 || bus_type == 15 || friendly_name.to_lowercase().contains("virtual");
+
+            if is_virtual && !self.debug_mode {
+                continue;
+            }
+
             let size_bytes = wmi_disk.Size.unwrap_or(0);
             let size_gb = (size_bytes / 1024 / 1024 / 1024) as u32;
             let is_sys = wmi_disk.IsSystem.unwrap_or(false) || wmi_disk.IsBoot.unwrap_or(false);
 
             disks.push(Disk {
                 stable_id: wmi_disk.Number.to_string(),
-                name: wmi_disk.FriendlyName.unwrap_or_else(|| "Unknown".to_string()),
+                name: friendly_name.to_string(),
                 total_gb: size_gb,
                 free_gb: 0,
                 is_system_drive: is_sys,
