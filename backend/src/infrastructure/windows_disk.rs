@@ -5,13 +5,14 @@ use wmi::WMIConnection;
 use crate::domain::errors::DiskError;
 use crate::domain::models::{Disk, Partition};
 use crate::domain::traits::DiskManager;
-
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
 struct MsftDisk {
     Number: u32,
     FriendlyName: Option<String>,
     Size: Option<u64>,
+    IsSystem: Option<bool>,
+    IsBoot: Option<bool>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -42,26 +43,27 @@ impl DiskManager for WindowsDiskManager {
             })?;
 
             let results: Vec<MsftDisk> = wmi_con
-                .raw_query("SELECT Number, FriendlyName, Size FROM MSFT_Disk")
+                .raw_query("SELECT Number, FriendlyName, Size, IsSystem, IsBoot FROM MSFT_Disk")
                 .map_err(|e| DiskError::WmiError(format!("WMI Query failed: {}", e)))?;
 
             Ok(results)
-        }).await.map_err(|e| DiskError::DataValidation(format!("Thread Pool crashed: {}", e)))??;
+            }).await.map_err(|e| DiskError::DataValidation(format!("Thread Pool crashed: {}", e)))??;
 
-        let mut disks = Vec::with_capacity(wmi_disks.len());
+            let mut disks = Vec::with_capacity(wmi_disks.len());
 
-        for wmi_disk in wmi_disks {
+            for wmi_disk in wmi_disks {
             let size_bytes = wmi_disk.Size.unwrap_or(0);
             let size_gb = (size_bytes / 1024 / 1024 / 1024) as u32;
+            let is_sys = wmi_disk.IsSystem.unwrap_or(false) || wmi_disk.IsBoot.unwrap_or(false);
 
             disks.push(Disk {
                 stable_id: wmi_disk.Number.to_string(),
                 name: wmi_disk.FriendlyName.unwrap_or_else(|| "Unknown".to_string()),
                 total_gb: size_gb,
                 free_gb: 0,
-                is_system_drive: false,
+                is_system_drive: is_sys,
             });
-        }
+            }
 
         disks.sort_by_key(|d| d.stable_id.parse::<u32>().unwrap_or(u32::MAX));
         Ok(disks)
@@ -77,7 +79,7 @@ impl DiskManager for WindowsDiskManager {
                 DiskError::WmiError(format!("WMI Connection failed: {}", e))
             })?;
 
-            let query = format!("SELECT DiskNumber, PartitionNumber, Size, DriveLetter FROM MSFT_Partition WHERE DiskNumber = {}", disk_index);
+            let query = format!("SELECT DiskNumber, PartitionNumber, Size, DriveLetter, IsSystem, IsBoot FROM MSFT_Partition WHERE DiskNumber = {}", disk_index);
 
             let results: Vec<MsftPartition> = wmi_con
                 .raw_query(&query)
