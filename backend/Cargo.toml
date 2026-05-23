@@ -15,3 +15,7 @@ clap = { version = "4", features = ["derive"] }
 shlex = "2.0.1"
 clap_complete = "4.6.5"
 rustyline = "18.0.0"
+
+[profile.dev]
+strip = "debuginfo"
+opt-level = 1

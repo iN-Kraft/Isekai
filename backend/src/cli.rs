@@ -171,8 +171,6 @@ impl CliREPL {
         let mut rl = Editor::with_config(config)?;
         rl.set_helper(Some(IsekaiHelper { disk_manager: self.disk_manager.clone() }));
 
-        let _ = rl.load_history("isekai_history.txt");
-
         loop {
             let readline = block_in_place(|| rl.readline("isekai> "));
 
@@ -211,8 +209,6 @@ impl CliREPL {
                 }
             }
         }
-
-        let _ = rl.save_history("isekai_history.txt");
 
         Ok(())
     }
