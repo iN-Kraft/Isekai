@@ -1,8 +1,14 @@
-use std::io::Write;
 use std::sync::Arc;
-use tokio::io::{self, AsyncBufReadExt, BufReader};
 use crate::domain::traits::DiskManager;
 use clap::{Parser, Subcommand};
+use rustyline::completion::{Completer, Pair};
+use rustyline::{CompletionType, Config, Context, Editor, Helper};
+use rustyline::error::ReadlineError;
+use rustyline::highlight::Highlighter;
+use rustyline::hint::Hinter;
+use rustyline::validate::Validator;
+use shlex::split;
+use tokio::task::block_in_place;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -37,11 +43,89 @@ pub enum Commands {
         /// Target size in GB
         target_size_gb: u32,
     },
+    /// Generate shell completions
+    Completions {
+        /// The shell to generate completions for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
     /// Exit the CLI
     Exit,
     /// Exit the CLI
     Quit,
 }
+
+pub struct IsekaiHelper {
+    disk_manager: Arc<dyn DiskManager>
+}
+
+impl Completer for IsekaiHelper {
+    type Candidate = Pair;
+
+    fn complete(&self, line: &str, pos: usize, ctx: &Context<'_>) -> rustyline::Result<(usize, Vec<Self::Candidate>)> {
+        let mut candidates = Vec::new();
+        let line_until_cursor = &line[..pos];
+        let tokens: Vec<&str> = line_until_cursor.split(' ').collect();
+
+        if tokens.len() == 1 {
+            let cmds = ["list", "parts", "shrink", "exit", "quit", "help"];
+            let word = tokens[0];
+            for cmd in cmds {
+                if cmd.starts_with(word) {
+                    candidates.push(Pair { display: cmd.to_string(), replacement: cmd.to_string() });
+                }
+            }
+            return Ok((pos - word.len(), candidates));
+        }
+
+        if tokens.len() == 2 && (tokens[0] == "parts" || tokens[0] == "shrink") {
+            let word = tokens[1];
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                let dm = self.disk_manager.clone();
+                // block_on safely executes the async future on the current thread
+                if let Ok(disks) = handle.block_on(async { dm.get_disks().await }) {
+                    for disk in disks {
+                        if disk.stable_id.starts_with(word) {
+                            candidates.push(Pair {
+                                display: format!("{} ({})", disk.stable_id, disk.name),
+                                replacement: disk.stable_id.clone(),
+                            });
+                        }
+                    }
+                }
+            }
+            return Ok((pos - word.len(), candidates));
+        }
+
+        if tokens.len() == 3 && tokens[0] == "shrink" {
+            let disk_id = tokens[1];
+            let word = tokens[2];
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                let dm = self.disk_manager.clone();
+                if let Ok(parts) = handle.block_on(async { dm.get_partitions(disk_id).await }) {
+                    for part in parts {
+                        if part.id.starts_with(word) {
+                            candidates.push(Pair {
+                                display: format!("{} ({}GB)", part.id, part.size_gb),
+                                replacement: part.id.clone(),
+                            });
+                        }
+                    }
+                }
+            }
+            return Ok((pos - word.len(), candidates));
+        }
+
+        Ok((pos, candidates))
+    }
+}
+
+impl Helper for IsekaiHelper { }
+impl Hinter for IsekaiHelper {
+    type Hint = String;
+}
+impl Highlighter for IsekaiHelper { }
+impl Validator for IsekaiHelper { }
 
 pub struct CliREPL {
     disk_manager: Arc<dyn DiskManager>,
@@ -63,6 +147,12 @@ impl CliREPL {
             Commands::Shrink { disk_id, partition_id, target_size_gb } => {
                 self.handle_shrink(&disk_id, &partition_id, target_size_gb).await;
             }
+            Commands::Completions { shell } => {
+                use clap::CommandFactory;
+                let mut cmd = IsekaiCli::command();
+                let bin_name = cmd.get_name().to_string();
+                clap_complete::generate(shell, &mut cmd, bin_name, &mut std::io::stdout());
+            }
             Commands::Exit | Commands::Quit => {
                 println!("Exiting CLI...");
                 return true;
@@ -75,52 +165,54 @@ impl CliREPL {
         println!("Welcome to Project Isekai CLI.");
         println!("Type 'help' for a list of commands.");
 
-        let stdin = io::stdin();
-        let mut reader = BufReader::new(stdin);
-        let mut line = String::new();
+        let config = Config::builder()
+            .completion_type(CompletionType::List)
+            .build();
+        let mut rl = Editor::with_config(config)?;
+        rl.set_helper(Some(IsekaiHelper { disk_manager: self.disk_manager.clone() }));
+
+        let _ = rl.load_history("isekai_history.txt");
 
         loop {
-            print!("isekai> ");
-            std::io::stdout().flush()?;
+            let readline = block_in_place(|| rl.readline("isekai> "));
 
-            line.clear();
-            let bytes_read = reader.read_line(&mut line).await?;
-            if bytes_read == 0 {
-                break; // EOF
-            }
+            match readline {
+                Ok(line) => {
+                    let input = line.trim();
+                    if input.is_empty() { continue; }
 
-            let input = line.trim();
-            if input.is_empty() {
-                continue;
-            }
+                    let _ = rl.add_history_entry(input);
+                    let tokens = match split(input) {
+                        Some(t) => t,
+                        None => {
+                            println!("Invalid input");
+                            continue
+                        },
+                    };
 
-            let tokens = match shlex::split(input) {
-                Some(t) => t,
-                None => {
-                    println!("Error: Invalid quoting in input.");
-                    continue;
-                }
-            };
+                    let mut clap_args = vec!["isekai".to_string()];
+                    clap_args.extend(tokens);
 
-            // We prepend a dummy executable name because clap expects it
-            let mut clap_args = vec!["isekai".to_string()];
-            clap_args.extend(tokens);
-
-            match IsekaiCli::try_parse_from(clap_args) {
-                Ok(cli) => {
-                    if let Some(cmd) = cli.command {
-                        if self.handle_command(cmd).await {
-                            break;
+                    match IsekaiCli::try_parse_from(clap_args) {
+                        Ok(cli) => {
+                            if let Some(cmd) = cli.command {
+                                if self.handle_command(cmd).await { break; }
+                            } else {
+                                println!("No command provided. Type 'help' for usage.");
+                            }
                         }
-                    } else {
-                        println!("No command provided. Type 'help' for usage.");
+                        Err(e) => println!("{}", e)
                     }
                 }
-                Err(e) => {
-                    println!("{}", e);
+                Err(ReadlineError::Interrupted | ReadlineError::Eof) => break,
+                Err(err) => {
+                    println!("Error: {:?}", err);
+                    break;
                 }
             }
         }
+
+        let _ = rl.save_history("isekai_history.txt");
 
         Ok(())
     }
