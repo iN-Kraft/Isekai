@@ -25,6 +25,13 @@ struct MsftPartition {
     DriveLetter: Option<String>,
 }
 
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "PascalCase")]
+struct MsftVolume {
+    DriveLetter: Option<String>,
+    FileSystem: Option<String>,
+}
+
 pub struct WindowsDiskManager {
     debug_mode: bool,
 }
@@ -83,18 +90,22 @@ impl DiskManager for WindowsDiskManager {
             DiskError::DiskNotFound(disk_id.to_string())
         })?;
 
-        let wmi_parts = tokio::task::spawn_blocking(move || -> Result<Vec<MsftPartition>, DiskError> {
+        let (wmi_parts, volumes) = tokio::task::spawn_blocking(move || -> Result<(Vec<MsftPartition>, Vec<MsftVolume>), DiskError> {
             let wmi_con = WMIConnection::with_namespace_path("ROOT\\Microsoft\\Windows\\Storage").map_err(|e| {
                 DiskError::WmiError(format!("WMI Connection failed: {}", e))
             })?;
 
-            let query = format!("SELECT DiskNumber, PartitionNumber, Size, DriveLetter, IsSystem, IsBoot FROM MSFT_Partition WHERE DiskNumber = {}", disk_index);
+            let query = format!("SELECT DiskNumber, PartitionNumber, Size, DriveLetter FROM MSFT_Partition WHERE DiskNumber = {}", disk_index);
 
             let results: Vec<MsftPartition> = wmi_con
                 .raw_query(&query)
                 .map_err(|e| DiskError::WmiError(format!("WMI Query failed: {}", e)))?;
 
-            Ok(results)
+            let volumes: Vec<MsftVolume> = wmi_con
+                .raw_query("SELECT DriveLetter, FileSystem FROM MSFT_Volume")
+                .unwrap_or_default();
+
+            Ok((results, volumes))
         }).await.map_err(|e| DiskError::DataValidation(format!("Thread Pool crashed: {}", e)))??;
 
         let mut partitions = Vec::with_capacity(wmi_parts.len());
@@ -103,11 +114,21 @@ impl DiskManager for WindowsDiskManager {
             let size_bytes = part.Size.unwrap_or(0);
             let size_gb = (size_bytes / 1024 / 1024 / 1024) as u32;
 
+            let mut fs = "Unknown".to_string();
             let mut drive_letter = None;
+            
             if let Some(dl) = &part.DriveLetter {
                 let trimmed = dl.trim_matches('\0').trim();
                 if !trimmed.is_empty() {
                     drive_letter = Some(format!("{}:", trimmed));
+                    
+                    if let Some(vol) = volumes.iter().find(|v| {
+                        v.DriveLetter.as_deref().map(|s| s.trim_matches('\0').trim()) == Some(trimmed)
+                    }) {
+                        if let Some(vol_fs) = &vol.FileSystem {
+                            fs = vol_fs.clone();
+                        }
+                    }
                 }
             }
 
@@ -115,7 +136,7 @@ impl DiskManager for WindowsDiskManager {
                 id: part.PartitionNumber.to_string(),
                 drive_letter,
                 size_gb,
-                file_system: "Unknown".to_string(),
+                file_system: fs,
             });
         }
 
