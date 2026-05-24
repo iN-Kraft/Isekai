@@ -1,46 +1,56 @@
 package dev.datlag.isekai
 
-import dev.datlag.isekai.domain.IpcClient
-import dev.datlag.isekai.domain.IsekaiCommand
-import dev.datlag.isekai.domain.IsekaiEvent
-import io.ktor.network.selector.SelectorManager
-import io.ktor.network.sockets.aSocket
-import io.ktor.network.sockets.openReadChannel
-import io.ktor.network.sockets.openWriteChannel
-import io.ktor.utils.io.readLine
-import io.ktor.utils.io.writeStringUtf8
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
+import dev.datlag.isekai.ipc.IpcClient
+import dev.datlag.isekai.ipc.IpcRequest
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
+@OptIn(ExperimentalUuidApi::class)
 fun main() = runBlocking {
     println("Isekai Frontend starting...")
 
     val client = IpcClient()
 
-    launch {
-        client.events.collect { event ->
-            when (event) {
-                is IsekaiEvent.DisksLoaded -> {
-                    println("\nKotlin received ${event.disks.size} disks from Rust!")
-                    event.disks.forEach { disk ->
-                        println("\t -> [${disk.diskNum}] ${disk.name} (${disk.totalGb} GB) System: ${disk.isSystemDrive}")
-                    }
+    try {
+        client.connect()
 
-                    client.disconnect()
-                }
-                is IsekaiEvent.Progress -> println("Progress: ${event.percent}% - ${event.step}")
-                is IsekaiEvent.FatalError -> println("Fatal error: ${event.message}")
+        val eventJob = launch {
+            client.events.collect { event ->
+                val percentStr = event.percent?.let { "[$it%]" } ?: ""
+                println("[LIVE EVENT] ${event.eventType} $percentStr: ${event.message}")
             }
         }
-    }
 
-    launch {
-        client.connect(45454)
-    }
+        delay(1000)
 
-    delay(1000)
-    client.sendCommand(IsekaiCommand.GetDisks)
+        val checkId = Uuid.random().toString()
+        val checkResponse = client.sendCommand(IpcRequest.CheckSystem(checkId))
+
+        if (checkResponse.success) {
+            println("Check Success!")
+            println("Data: ${checkResponse.data}")
+        } else {
+            println("Check Failed: ${checkResponse.error}")
+        }
+
+        val disksId = Uuid.random().toString()
+        val disksResponse = client.sendCommand(IpcRequest.GetDisks(disksId))
+
+        if (disksResponse.success) {
+            println("Disks Success!")
+            println("Data: ${disksResponse.data}")
+        } else {
+            println("Disks Failed: ${disksResponse.error}")
+        }
+
+        delay(3000)
+        eventJob.cancel()
+        println("Client shutting down.")
+    } catch (e: Exception) {
+        println("CRITICAL FAILURE")
+        e.printStackTrace()
+    }
 }

@@ -3,7 +3,7 @@ use crate::domain::models::{Disk, Partition};
 use crate::domain::validation::ValidationReport;
 
 #[derive(Deserialize, Debug)]
-#[serde(tag = "protocol")]
+#[serde(tag = "method")]
 pub enum IpcProtocol {
     CheckSystem,
     GetDisks,
