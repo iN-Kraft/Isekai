@@ -1,20 +1,21 @@
 use std::error::Error;
 use std::fmt::{Display, Formatter};
+use serde::Serialize;
 
-#[derive(Debug, Clone)]
+#[derive(Serialize, Debug, Clone)]
 pub enum ComponentStatus {
     Installed(String),
     Missing
 }
 
-#[derive(Debug, Clone)]
+#[derive(Serialize, Debug, Clone)]
 pub struct SystemComponent {
     pub name: String,
     pub status: ComponentStatus,
     pub is_critical: bool
 }
 
-#[derive(Debug, Clone)]
+#[derive(Serialize, Debug, Clone)]
 pub struct ValidationReport {
     pub os_name: String,
     pub components: Vec<SystemComponent>,
