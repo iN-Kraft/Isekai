@@ -113,7 +113,9 @@ impl Drop for MountGuard {
         if self.needs_unmount {
             let _ = std::process::Command::new("umount")
                 .args(["-l", &self.mountpoint])
-                .output();
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
             let _ = std::fs::remove_dir(&self.mountpoint);
         }
     }

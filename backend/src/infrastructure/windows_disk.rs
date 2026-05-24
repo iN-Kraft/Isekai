@@ -103,7 +103,7 @@ impl DiskManager for WindowsDiskManager {
 
             let volumes: Vec<MsftVolume> = wmi_con
                 .raw_query("SELECT DriveLetter, FileSystem FROM MSFT_Volume")
-                .unwrap_or_default();
+                .map_err(|e| DiskError::WmiError(format!("WMI Volume Query failed: {}", e)))?;
 
             Ok((results, volumes))
         }).await.map_err(|e| DiskError::DataValidation(format!("Thread Pool crashed: {}", e)))??;

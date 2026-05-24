@@ -1,132 +1,18 @@
 use std::sync::Arc;
-use crate::domain::traits::DiskManager;
-use clap::{Parser, Subcommand};
-use rustyline::completion::{Completer, Pair};
-use rustyline::{CompletionType, Config, Context, Editor, Helper};
+use clap::Parser;
+use rustyline::{CompletionType, Config, Editor};
 use rustyline::error::ReadlineError;
-use rustyline::highlight::Highlighter;
-use rustyline::hint::Hinter;
-use rustyline::validate::Validator;
 use shlex::split;
 use tokio::task::block_in_place;
+
+use crate::domain::traits::DiskManager;
 use crate::domain::validation::ComponentStatus;
 use crate::infrastructure::NativeValidator;
-
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-pub struct IsekaiCli {
-    /// Enable debug mode (shows virtual drives/loops)
-    #[arg(short, long, global = true)]
-    pub debug: bool,
-
-    /// Enter interactive REPL mode
-    #[arg(short, long)]
-    pub cli: bool,
-
-    #[command(subcommand)]
-    pub command: Option<Commands>,
-}
-
-#[derive(Subcommand, Debug)]
-pub enum Commands {
-    /// Check if required system packages are available
-    Check,
-    /// List all available physical disks
-    List,
-    /// List partitions for a specific disk
-    Parts {
-        /// The Hardware ID of the disk
-        disk_id: String,
-    },
-    /// Shrink a partition on a disk
-    Shrink {
-        /// The Hardware ID of the disk
-        disk_id: String,
-        /// The ID of the partition
-        partition_id: String,
-        /// Target size in GB
-        target_size_gb: u32,
-    },
-    /// Exit the CLI
-    Exit,
-    /// Exit the CLI
-    Quit,
-}
-
-pub struct IsekaiHelper {
-    disk_manager: Arc<dyn DiskManager>
-}
-
-impl Completer for IsekaiHelper {
-    type Candidate = Pair;
-
-    fn complete(&self, line: &str, pos: usize, ctx: &Context<'_>) -> rustyline::Result<(usize, Vec<Self::Candidate>)> {
-        let mut candidates = Vec::new();
-        let line_until_cursor = &line[..pos];
-        let tokens: Vec<&str> = line_until_cursor.split(' ').collect();
-
-        if tokens.len() == 1 {
-            let cmds = ["check", "list", "parts", "shrink", "exit", "quit", "help"];
-            let word = tokens[0];
-            for cmd in cmds {
-                if cmd.starts_with(word) {
-                    candidates.push(Pair { display: cmd.to_string(), replacement: cmd.to_string() });
-                }
-            }
-            return Ok((pos - word.len(), candidates));
-        }
-
-        if tokens.len() == 2 && (tokens[0] == "parts" || tokens[0] == "shrink") {
-            let word = tokens[1];
-            if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                let dm = self.disk_manager.clone();
-                // block_on safely executes the async future on the current thread
-                if let Ok(disks) = handle.block_on(async { dm.get_disks().await }) {
-                    for disk in disks {
-                        if disk.stable_id.starts_with(word) {
-                            candidates.push(Pair {
-                                display: format!("{} ({})", disk.stable_id, disk.name),
-                                replacement: disk.stable_id.clone(),
-                            });
-                        }
-                    }
-                }
-            }
-            return Ok((pos - word.len(), candidates));
-        }
-
-        if tokens.len() == 3 && tokens[0] == "shrink" {
-            let disk_id = tokens[1];
-            let word = tokens[2];
-            if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                let dm = self.disk_manager.clone();
-                if let Ok(parts) = handle.block_on(async { dm.get_partitions(disk_id).await }) {
-                    for part in parts {
-                        if part.id.starts_with(word) {
-                            candidates.push(Pair {
-                                display: format!("{} ({}GB)", part.id, part.size_gb),
-                                replacement: part.id.clone(),
-                            });
-                        }
-                    }
-                }
-            }
-            return Ok((pos - word.len(), candidates));
-        }
-
-        Ok((pos, candidates))
-    }
-}
-
-impl Helper for IsekaiHelper { }
-impl Hinter for IsekaiHelper {
-    type Hint = String;
-}
-impl Highlighter for IsekaiHelper { }
-impl Validator for IsekaiHelper { }
+use crate::cli::commands::{Commands, IsekaiCli};
+use crate::cli::helper::IsekaiHelper;
 
 pub struct CliREPL {
-    disk_manager: Arc<dyn DiskManager>,
+    pub disk_manager: Arc<dyn DiskManager>,
 }
 
 impl CliREPL {
@@ -283,7 +169,7 @@ impl CliREPL {
                 println!("{:<40} | {:<10} | {:<10} | {:<10}", "ID", "Mount", "Size (GB)", "FS");
                 println!("{:-<85}", "");
                 for part in partitions {
-                    let mount = part.drive_letter.unwrap_or_else(|| "-".to_string());
+                    let mount = part.drive_letter.as_deref().unwrap_or("-");
                     let truncated_uuid = if part.id.len() > 38 {
                         format!("{}...", &part.id[..35])
                     } else {
