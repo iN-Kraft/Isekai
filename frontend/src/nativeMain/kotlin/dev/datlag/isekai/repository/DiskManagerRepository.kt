@@ -1,9 +1,15 @@
-package dev.datlag.isekai.ipc
+package dev.datlag.isekai.repository
 
+import dev.datlag.isekai.ipc.Disk
+import dev.datlag.isekai.ipc.IpcConnectionException
+import dev.datlag.isekai.ipc.IpcRequest
+import dev.datlag.isekai.ipc.IpcTransport
+import dev.datlag.isekai.ipc.OutgoingMessage
+import dev.datlag.isekai.ipc.Partition
+import dev.datlag.isekai.ipc.ValidationReport
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.decodeFromJsonElement
-import kotlin.random.Random
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -23,19 +29,19 @@ class DiskManagerRepository(private val transport: IpcTransport) {
     /**
      * Performs a system-wide validation check.
      */
-    suspend fun checkSystem(): Result<ValidationReport> = 
+    suspend fun checkSystem(): Result<ValidationReport> =
         execute { IpcRequest.CheckSystem(it) }
 
     /**
      * Retrieves a list of available disks.
      */
-    suspend fun getDisks(): Result<List<Disk>> = 
+    suspend fun getDisks(): Result<List<Disk>> =
         execute { IpcRequest.GetDisks(it) }
 
     /**
      * Retrieves partitions for a specific disk.
      */
-    suspend fun getPartitions(diskId: String): Result<List<Partition>> = 
+    suspend fun getPartitions(diskId: String): Result<List<Partition>> =
         execute { IpcRequest.GetPartitions(it, diskId) }
 
     /**
@@ -54,7 +60,7 @@ class DiskManagerRepository(private val transport: IpcTransport) {
             val id = generateId()
             val request = requestFactory(id)
             val response = transport.send(request)
-            
+
             if (response.success) {
                 if (T::class == Unit::class) {
                     @Suppress("UNCHECKED_CAST")

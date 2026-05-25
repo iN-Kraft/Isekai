@@ -43,14 +43,15 @@ kotlin {
             }
         }
     }
-    linuxArm64 {
+    // Kodein Compose does not support linuxArm64 right now
+    /*linuxArm64 {
         binaries {
             executable {
                 entryPoint = "dev.datlag.isekai.main"
                 linkerOpts(getGlibLibs(getPkgConfigCmd(), getArm64Sysroot()).get())
             }
         }
-    }
+    }*/
     mingwX64 {
         binaries {
             executable {
@@ -87,6 +88,7 @@ kotlin {
             implementation(libs.coroutines)
             implementation(libs.ktor)
             implementation(libs.serialization.json)
+            implementation(libs.kodein.compose.runtime)
         }
     }
 }

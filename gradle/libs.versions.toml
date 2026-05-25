@@ -1,6 +1,7 @@
 [versions]
 compose = "1.11.0"
 coroutines = "1.11.0"
+kodein = "7.32.0"
 kommons = "2.0.0"
 kotlin = "2.3.21"
 ktor = "3.5.0"
@@ -9,6 +10,8 @@ serialization = "1.11.0"
 [libraries]
 adwaita-compose = { group = "dev.datlag.kommons", name = "adwaita-compose", version.ref = "kommons" }
 coroutines = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
+kodein = { group = "org.kodein.di", name = "kodein-di", version.ref = "kodein" }
+kodein-compose-runtime = { group = "org.kodein.di", name = "kodein-di-framework-compose-runtime", version.ref = "kodein" }
 ktor = { group = "io.ktor", name = "ktor-network", version.ref = "ktor" }
 serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
 

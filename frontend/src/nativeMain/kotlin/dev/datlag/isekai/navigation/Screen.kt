@@ -1,0 +1,19 @@
+package dev.datlag.isekai.navigation
+
+import kotlinx.serialization.Serializable
+
+@Serializable
+sealed interface Screen {
+
+    @Serializable
+    data object Introduction : Screen
+
+    @Serializable
+    data object Connection : Screen
+
+    @Serializable
+    data object SystemCheck : Screen
+
+    @Serializable
+    data object Home : Screen
+}

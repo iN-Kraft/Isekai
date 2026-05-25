@@ -10,5 +10,6 @@ object Symbols {
     val NETWORK_ERROR = IconName("network-wired-no-route-symbolic")
 
     val PACKAGES = IconName("system-software-install-symbolic")
+    val SEARCH = IconName("system-search-symbolic")
 
 }
