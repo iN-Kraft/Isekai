@@ -1,8 +1,11 @@
 package dev.datlag.isekai.module
 
 import dev.datlag.isekai.ipc.IpcTransport
-import dev.datlag.isekai.repository.DiskManagerRepository
-import dev.datlag.isekai.viewmodel.AppViewModel
+import dev.datlag.isekai.repository.DiskRepository
+import dev.datlag.isekai.repository.SystemRepository
+import dev.datlag.isekai.viewmodel.ConnectionViewModel
+import dev.datlag.isekai.viewmodel.DiskViewModel
+import dev.datlag.isekai.viewmodel.SystemViewModel
 import kotlinx.coroutines.CoroutineScope
 import org.kodein.di.DI
 import org.kodein.di.bindFactory
@@ -16,9 +19,20 @@ object AppModule {
         bindSingleton<IpcTransport> {
             IpcTransport()
         }
-        bindSingleton { DiskManagerRepository(instance()) }
-        bindFactory<CoroutineScope, AppViewModel> { scope ->
-            AppViewModel(instance(), instance(), scope)
+        
+        bindSingleton { SystemRepository(instance()) }
+        bindSingleton { DiskRepository(instance()) }
+
+        bindFactory<CoroutineScope, ConnectionViewModel> { scope ->
+            ConnectionViewModel(directDI = this, viewModelScope = scope)
+        }
+
+        bindFactory<CoroutineScope, SystemViewModel> { scope ->
+            SystemViewModel(directDI = this, viewModelScope = scope)
+        }
+
+        bindFactory<CoroutineScope, DiskViewModel> { scope ->
+            DiskViewModel(directDI = this, viewModelScope = scope)
         }
     }
 

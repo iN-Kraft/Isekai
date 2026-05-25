@@ -3,7 +3,7 @@ package dev.datlag.isekai.navigation
 import kotlinx.serialization.Serializable
 
 @Serializable
-sealed interface Screen {
+sealed interface Screen : NavKey {
 
     @Serializable
     data object Introduction : Screen

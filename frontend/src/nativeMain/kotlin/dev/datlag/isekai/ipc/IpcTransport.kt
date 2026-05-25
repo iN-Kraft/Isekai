@@ -101,7 +101,8 @@ class IpcTransport(
                         }
                     }
                 } catch (e: Exception) {
-                    // Skip malformed lines or unknown messages
+                    println("Failed to decode IPC message: $line")
+                    e.printStackTrace()
                 }
             }
         } catch (e: Exception) {
