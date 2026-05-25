@@ -1,7 +1,8 @@
 package dev.datlag.isekai
 
-import dev.datlag.isekai.ipc.IpcClient
+import dev.datlag.isekai.ipc.DiskManagerRepository
 import dev.datlag.isekai.ipc.IpcRequest
+import dev.datlag.isekai.ipc.IpcTransport
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -12,45 +13,26 @@ import kotlin.uuid.Uuid
 fun main() = runBlocking {
     println("Isekai Frontend starting...")
 
-    val client = IpcClient()
+    val client = IpcTransport()
+    client.connect()
 
-    try {
-        client.connect()
+    delay(1000)
 
-        val eventJob = launch {
-            client.events.collect { event ->
-                val percentStr = event.percent?.let { "[$it%]" } ?: ""
-                println("[LIVE EVENT] ${event.eventType} $percentStr: ${event.message}")
-            }
-        }
+    val repo = DiskManagerRepository(client)
+    val systemResult = repo.checkSystem()
 
-        delay(1000)
-
-        val checkId = Uuid.random().toString()
-        val checkResponse = client.sendCommand(IpcRequest.CheckSystem(checkId))
-
-        if (checkResponse.success) {
-            println("Check Success!")
-            println("Data: ${checkResponse.data}")
-        } else {
-            println("Check Failed: ${checkResponse.error}")
-        }
-
-        val disksId = Uuid.random().toString()
-        val disksResponse = client.sendCommand(IpcRequest.GetDisks(disksId))
-
-        if (disksResponse.success) {
-            println("Disks Success!")
-            println("Data: ${disksResponse.data}")
-        } else {
-            println("Disks Failed: ${disksResponse.error}")
-        }
-
-        delay(3000)
-        eventJob.cancel()
-        println("Client shutting down.")
-    } catch (e: Exception) {
-        println("CRITICAL FAILURE")
-        e.printStackTrace()
+    systemResult.onSuccess {
+        println(it)
+    }.onFailure {
+        println(it)
     }
+
+    val diskResult = repo.getDisks()
+    diskResult.onSuccess {
+        println(it)
+    }.onFailure {
+        println(it)
+    }
+
+    return@runBlocking
 }

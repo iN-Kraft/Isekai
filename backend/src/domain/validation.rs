@@ -3,12 +3,14 @@ use std::fmt::{Display, Formatter};
 use serde::Serialize;
 
 #[derive(Serialize, Debug, Clone)]
+#[serde(tag = "type", content = "version")]
 pub enum ComponentStatus {
     Installed(String),
     Missing
 }
 
 #[derive(Serialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct SystemComponent {
     pub name: String,
     pub status: ComponentStatus,
@@ -16,6 +18,7 @@ pub struct SystemComponent {
 }
 
 #[derive(Serialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct ValidationReport {
     pub os_name: String,
     pub components: Vec<SystemComponent>,

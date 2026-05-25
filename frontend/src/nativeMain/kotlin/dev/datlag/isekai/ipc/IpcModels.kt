@@ -1,0 +1,105 @@
+package dev.datlag.isekai.ipc
+
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+
+/**
+ * Common IPC message formats.
+ */
+
+@Serializable
+sealed class IpcRequest {
+    abstract val id: String
+
+    @Serializable
+    @SerialName("CheckSystem")
+    data class CheckSystem(override val id: String) : IpcRequest()
+
+    @Serializable
+    @SerialName("GetDisks")
+    data class GetDisks(override val id: String) : IpcRequest()
+
+    @Serializable
+    @SerialName("GetPartitions")
+    data class GetPartitions(
+        override val id: String,
+        @SerialName("disk_id") val diskId: String,
+    ) : IpcRequest()
+
+    @Serializable
+    @SerialName("ShrinkPartition")
+    data class ShrinkPartition(
+        override val id: String,
+        @SerialName("disk_id") val diskId: String,
+        @SerialName("partition_id") val partitionId: String,
+        @SerialName("target_size_gb") val targetSizeGb: UInt,
+    ) : IpcRequest()
+}
+
+@Serializable
+sealed class OutgoingMessage {
+
+    @Serializable
+    @SerialName("Response")
+    data class Response(
+        val id: String,
+        val success: Boolean,
+        val data: JsonElement? = null,
+        val error: String? = null
+    ) : OutgoingMessage()
+
+    @Serializable
+    @SerialName("Event")
+    data class Event(
+        @SerialName("event_type") val eventType: String,
+        val message: String,
+        val percent: Int? = null
+    ) : OutgoingMessage()
+}
+
+/**
+ * Domain Models mapped from Rust.
+ */
+
+@Serializable
+data class Disk(
+    val stableId: String,
+    val name: String,
+    val totalGb: UInt,
+    val freeGb: UInt,
+    val isSystemDrive: Boolean
+)
+
+@Serializable
+data class Partition(
+    val id: String,
+    val driveLetter: String? = null,
+    val sizeGb: UInt,
+    val fileSystem: String
+)
+
+@Serializable
+data class ValidationReport(
+    val osName: String,
+    val components: List<SystemComponent>,
+    val isReady: Boolean
+)
+
+@Serializable
+data class SystemComponent(
+    val name: String,
+    val status: ComponentStatus,
+    val isCritical: Boolean
+)
+
+@Serializable
+sealed class ComponentStatus {
+    @Serializable
+    @SerialName("Installed")
+    data class Installed(val version: String) : ComponentStatus()
+
+    @Serializable
+    @SerialName("Missing")
+    object Missing : ComponentStatus()
+}
