@@ -1,14 +1,24 @@
 package dev.datlag.isekai.ipc
 
+import kotlinx.coroutines.CancellationException
 import io.ktor.network.selector.SelectorManager
 import io.ktor.network.sockets.*
 import io.ktor.util.collections.ConcurrentMap
 import io.ktor.utils.io.*
 import kotlinx.coroutines.*
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.Json
+
+sealed class ConnectionState {
+    data object Disconnected : ConnectionState()
+    data object Connecting : ConnectionState()
+    data object Connected : ConnectionState()
+    data class Error(val message: String, val exception: Throwable? = null) : ConnectionState()
+}
 
 /**
  * Custom exception for IPC communication errors.
@@ -38,6 +48,9 @@ class IpcTransport(
     private var sendChannel: ByteWriteChannel? = null
     private var readJob: Job? = null
 
+    private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
+    val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+
     private val _events = MutableSharedFlow<OutgoingMessage.Event>(extraBufferCapacity = 64)
     val events = _events.asSharedFlow()
 
@@ -45,8 +58,15 @@ class IpcTransport(
 
     /**
      * Connects to the backend and starts the read loop.
+     * Emits state changes to [connectionState] without throwing exceptions on failure.
      */
     suspend fun connect() = withContext(Dispatchers.IO) {
+        if (_connectionState.value is ConnectionState.Connected || _connectionState.value is ConnectionState.Connecting) {
+            return@withContext
+        }
+
+        _connectionState.value = ConnectionState.Connecting
+        
         try {
             val s = aSocket(selectorManager).tcp().connect(host, port)
             socket = s
@@ -54,20 +74,25 @@ class IpcTransport(
             
             val receiveChannel = s.openReadChannel()
             
+            _connectionState.value = ConnectionState.Connected
+            
             readJob = CoroutineScope(Dispatchers.IO).launch {
                 readLoop(receiveChannel)
             }
         } catch (e: Exception) {
-            throw IpcConnectionException("Failed to connect to backend at $host:$port", e)
+            _connectionState.value = ConnectionState.Error("Failed to connect to backend at $host:$port", e)
+            cleanup(IpcConnectionException("Connection failed", e))
         }
     }
 
     private suspend fun readLoop(channel: ByteReadChannel) {
+        var error: Exception? = null
         try {
             while (currentCoroutineContext().isActive && !channel.isClosedForRead) {
-                val line = channel.readLine() ?: break
+                val line = channel.readLine() ?: break // Break on EOF
                 try {
-                    when (val msg = json.decodeFromString<OutgoingMessage>(line)) {
+                    val msg = json.decodeFromString<OutgoingMessage>(line)
+                    when (msg) {
                         is OutgoingMessage.Event -> {
                             _events.emit(msg)
                         }
@@ -80,9 +105,17 @@ class IpcTransport(
                 }
             }
         } catch (e: Exception) {
-            // Handle unexpected socket drops or errors
+            // Handle unexpected socket drops or errors (ignore routine cancellations)
+            if (e !is CancellationException) {
+                error = e
+            }
         } finally {
-            cleanup(IpcConnectionException("Connection closed"))
+            if (error != null) {
+                _connectionState.value = ConnectionState.Error("Connection lost", error)
+            } else if (_connectionState.value !is ConnectionState.Disconnected) {
+                _connectionState.value = ConnectionState.Disconnected
+            }
+            cleanup(IpcConnectionException("Connection closed", error))
         }
     }
 
@@ -111,6 +144,15 @@ class IpcTransport(
         }
     }
 
+    /**
+     * Cleanly closes the socket and resets the state to Disconnected.
+     */
+    fun disconnect() {
+        readJob?.cancel()
+        cleanup()
+        _connectionState.value = ConnectionState.Disconnected
+    }
+
     private fun cleanup(exception: Exception? = null) {
         socket?.close()
         socket = null
@@ -127,8 +169,7 @@ class IpcTransport(
     }
 
     override fun close() {
-        readJob?.cancel()
-        cleanup()
+        disconnect()
         selectorManager.close()
     }
 }

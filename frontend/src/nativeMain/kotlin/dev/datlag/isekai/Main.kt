@@ -1,5 +1,6 @@
 package dev.datlag.isekai
 
+import dev.datlag.isekai.ipc.ConnectionState
 import dev.datlag.isekai.ipc.DiskManagerRepository
 import dev.datlag.isekai.ipc.IpcRequest
 import dev.datlag.isekai.ipc.IpcTransport
@@ -11,28 +12,25 @@ import kotlin.uuid.Uuid
 
 @OptIn(ExperimentalUuidApi::class)
 fun main() = runBlocking {
-    println("Isekai Frontend starting...")
-
     val client = IpcTransport()
+
+    launch {
+        client.connectionState.collect { state ->
+            when (state) {
+                is ConnectionState.Connecting -> println("Isekai Frontend connecting...")
+                is ConnectionState.Connected -> {
+                    val repo = DiskManagerRepository(client)
+
+                    println(repo.checkSystem().getOrNull())
+                }
+                is ConnectionState.Error -> {
+                    println(state.message)
+                    state.exception?.printStackTrace()
+                }
+                is ConnectionState.Disconnected -> println("Isekai Frontend disconnected...")
+            }
+        }
+    }
+
     client.connect()
-
-    delay(1000)
-
-    val repo = DiskManagerRepository(client)
-    val systemResult = repo.checkSystem()
-
-    systemResult.onSuccess {
-        println(it)
-    }.onFailure {
-        println(it)
-    }
-
-    val diskResult = repo.getDisks()
-    diskResult.onSuccess {
-        println(it)
-    }.onFailure {
-        println(it)
-    }
-
-    return@runBlocking
 }
