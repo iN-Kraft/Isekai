@@ -3,6 +3,8 @@ package dev.datlag.isekai.navigation
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.runtime.snapshots.StateObject
+import kotlin.reflect.KClass
 
 /**
  * Marker interface for all screen routes.
@@ -12,92 +14,73 @@ interface NavKey
 /**
  * A pure Compose navigation backstack utilizing SnapshotStateList.
  */
-class NavBackStack<T : NavKey>(initialKey: T) {
+class NavBackStack<T : NavKey>(
+    private val base: SnapshotStateList<T>
+) : StateObject by base, MutableList<T> by base, RandomAccess by base {
 
-    internal val _items: SnapshotStateList<T> = mutableStateListOf(initialKey)
-    
-    /**
-     * Immutable view of the current backstack.
-     */
-    val items: List<T> get() = _items
+    constructor(vararg elements: T) : this(mutableStateListOf(*elements))
 
-    /**
-     * The currently active screen.
-     */
-    val current: T? get() = _items.lastOrNull()
+    fun push(key: T): Boolean = add(element = key)
 
-    fun push(key: T) {
-        _items.add(key)
+    fun replaceCurrent(key: T) = mutate {
+        base[lastIndex] = key
     }
 
-    fun replaceCurrent(key: T) {
-        Snapshot.withMutableSnapshot {
-            if (_items.isNotEmpty()) {
-                _items.removeLast()
-            }
-            _items.add(key)
+    fun replaceAll(vararg keys: T): Boolean {
+        if (keys.isEmpty()) {
+            return false
         }
-    }
 
-    fun replaceAll(vararg keys: T) {
-        Snapshot.withMutableSnapshot {
-            _items.clear()
-            _items.addAll(keys)
+        return mutate {
+            clear()
+            addAll(keys)
         }
     }
 
     fun pop(): Boolean {
-        return if (_items.size > 1) {
-            _items.removeLast()
-            true
-        } else {
-            false
+        if (size <= 1) {
+            return false
+        }
+
+        return mutate {
+            removeLastOrNull()
+        } != null
+    }
+
+    fun popWhile(predicate: (T) -> Boolean) = mutate {
+        while (size > 1 && predicate(last())) {
+            removeLastOrNull()
         }
     }
 
-    fun popWhile(predicate: (T) -> Boolean) {
-        Snapshot.withMutableSnapshot {
-            while (_items.isNotEmpty() && predicate(_items.last())) {
-                _items.removeLast()
-            }
+    fun popTo(index: Int, inclusive: Boolean = false) = mutate {
+        if (index !in indices) {
+            return@mutate
+        }
+
+        val removeFrom = if (inclusive) index else index + 1
+
+        when {
+            removeFrom >= size -> return@mutate
+            removeFrom <= 0 -> replaceAll(first())
+            else -> removeRange(removeFrom, size)
         }
     }
 
-    fun popTo(index: Int, inclusive: Boolean = false) {
-        Snapshot.withMutableSnapshot {
-            if (index < 0 || index >= _items.size) return@withMutableSnapshot
-            val targetSize = if (inclusive) index else index + 1
-            while (_items.size > targetSize) {
-                _items.removeLast()
-            }
-        }
-    }
-
-    internal inline fun <reified K : T> popTo(inclusive: Boolean = false) {
-        Snapshot.withMutableSnapshot {
-            val index = _items.indexOfLast { it is K }
-            if (index != -1) {
-                popTo(index, inclusive)
-            }
-        }
+    fun popTo(type: KClass<out NavKey>, inclusive: Boolean = false) {
+        val index = indexOfLast { it::class == type }
+        popTo(index, inclusive)
     }
 
     fun popTo(key: T, inclusive: Boolean = false) {
-        Snapshot.withMutableSnapshot {
-            val index = _items.indexOfLast { it == key }
-            if (index != -1) {
-                popTo(index, inclusive)
-            }
-        }
+        popTo(type = key::class, inclusive)
     }
 
-    fun popToFirst() {
-        Snapshot.withMutableSnapshot {
-            if (_items.size > 1) {
-                val first = _items.first()
-                _items.clear()
-                _items.add(first)
-            }
-        }
+    fun popToFirst() = popTo(0)
+
+    private fun removeRange(from: Int, to: Int) = mutate {
+        subList(from, to).clear()
     }
+
+    private fun <R> mutate(block: () -> R) = Snapshot.withMutableSnapshot(block)
 }

@@ -1,6 +1,9 @@
 package dev.datlag.isekai.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 
 /**
  * A container that renders the currently active screen from a [NavBackStack].
@@ -12,9 +15,11 @@ fun <T : NavKey> NavHost(
     backStack: NavBackStack<T>,
     content: @Composable (T) -> Unit
 ) {
-    val currentScreen = backStack.current
+    val currentScreen by remember(backStack) {
+        derivedStateOf { backStack.lastOrNull() }
+    }
 
-    if (currentScreen != null) {
-        content(currentScreen)
+    currentScreen?.let {
+        content(it)
     }
 }
