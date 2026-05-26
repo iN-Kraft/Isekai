@@ -17,47 +17,52 @@ import dev.datlag.kommons.adwaita.compose.component.WindowTitle
 import dev.datlag.kommons.gtk.compose.modifier.Modifier
 import dev.datlag.kommons.gtk.compose.modifier.fillMaxSize
 import dev.datlag.kommons.gtk.compose.modifier.fillMaxWidth
+import dev.datlag.kommons.gtk.glib.GLib
 import org.kodein.di.DI
 import org.kodein.di.compose.LocalDI
 
-fun main(args: Array<String>) = adwaitaApplication(
-    applicationId = "dev.datlag.isekai",
-    title = "Isekai",
-    args = args.asIterable()
-) {
-    val di = remember { DI {
+fun main(args: Array<String>) {
+    val di = DI {
         import(AppModule.di)
-    } }
+    }
+    GLib.setApplicationName("Project Isekai") // Localize later
+    GLib.setPrgname("Project Isekai") // Do not localize
 
-    CompositionLocalProvider(LocalDI provides di) {
-        val backStack = remember { NavBackStack<Screen>(Screen.Introduction) }
+    adwaitaApplication(
+        applicationId = "dev.datlag.isekai",
+        title = "Project Isekai",
+        args = args.asIterable()
+    ) {
+        CompositionLocalProvider(LocalDI provides di) {
+            val backStack = remember { NavBackStack<Screen>(Screen.Introduction) }
 
-        Scaffold(
-            modifier = Modifier.fillMaxSize(),
-            topBar = {
-                TopAppBar(
-                    modifier = Modifier.fillMaxWidth(),
-                    title = { WindowTitle("Isekai") },
-                )
-            }
-        ) {
-            NavHost(backStack = backStack) { currentScreen ->
-                when (currentScreen) {
-                    is Screen.Introduction -> {
-                        IntroductionScreen(onSkip = { backStack.replaceCurrent(Screen.Connection) })
-                    }
-                    is Screen.Connection -> {
-                        ConnectionScreen(
-                            onConnected = { backStack.replaceAll(Screen.SystemCheck) }
-                        )
-                    }
-                    is Screen.SystemCheck -> {
-                        SystemCheckScreen(
-                            onReady = { backStack.replaceAll(Screen.Home) }
-                        )
-                    }
-                    is Screen.Home -> {
-                        HomeScreen()
+            Scaffold(
+                modifier = Modifier.fillMaxSize(),
+                topBar = {
+                    TopAppBar(
+                        modifier = Modifier.fillMaxWidth(),
+                        title = { WindowTitle("Project Isekai") },
+                    )
+                }
+            ) {
+                NavHost(backStack = backStack) { currentScreen ->
+                    when (currentScreen) {
+                        is Screen.Introduction -> {
+                            IntroductionScreen(onNavigateNext = { nextScreen -> backStack.replaceAll(nextScreen) })
+                        }
+                        is Screen.Connection -> {
+                            ConnectionScreen(
+                                onConnected = { backStack.replaceAll(Screen.SystemCheck) }
+                            )
+                        }
+                        is Screen.SystemCheck -> {
+                            SystemCheckScreen(
+                                onReady = { backStack.replaceAll(Screen.Home) }
+                            )
+                        }
+                        is Screen.Home -> {
+                            HomeScreen()
+                        }
                     }
                 }
             }
