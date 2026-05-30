@@ -26,15 +26,27 @@ pub enum Commands {
         /// The Hardware ID of the disk
         disk_id: String,
     },
-    /// Shrink a partition on a disk
-    Shrink {
-        /// The Hardware ID of the disk
+    
+    /// Shrink an existing NTFS partition and install the ISO alongside it
+    #[cfg(target_os = "windows")]
+    ShrinkAndInstall {
+        /// Target Disk Hardware ID
+        #[arg(long)]
         disk_id: String,
-        /// The ID of the partition
+        /// Target Partition ID to Shrink (e.g. your C: drive partition)
+        #[arg(long)]
         partition_id: String,
-        /// Target size in GB
-        target_size_gb: u32,
+        /// Absolute path to the payload ISO
+        #[arg(long)]
+        iso_path: String,
+        /// Target space required for the Linux payload in GB
+        #[arg(long)]
+        linux_size_gb: u32,
+        /// Boot partition size overhead in GB
+        #[arg(long)]
+        boot_size_gb: u32,
     },
+
     /// Exit the CLI
     Exit,
     /// Exit the CLI

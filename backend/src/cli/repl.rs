@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use clap::Parser;
+use tracing::{info, error};
 use rustyline::{CompletionType, Config, Editor};
 use rustyline::error::ReadlineError;
 use shlex::split;
@@ -7,7 +8,20 @@ use tokio::task::block_in_place;
 
 use crate::domain::traits::DiskManager;
 use crate::domain::validation::ComponentStatus;
+use crate::domain::errors::DiskError;
+
+#[cfg(target_os = "windows")]
+use crate::infrastructure::{
+    NativeValidator,
+    iso_manager::IsoManager, 
+    payload_manager::PayloadManager, 
+    boot_manager::BootManager,
+    NativeDiskManager
+};
+
+#[cfg(target_os = "linux")]
 use crate::infrastructure::NativeValidator;
+
 use crate::cli::commands::{Commands, IsekaiCli};
 use crate::cli::helper::IsekaiHelper;
 
@@ -31,8 +45,13 @@ impl CliREPL {
             Commands::Parts { disk_id } => {
                 self.handle_parts(&disk_id).await;
             }
-            Commands::Shrink { disk_id, partition_id, target_size_gb } => {
-                self.handle_shrink(&disk_id, &partition_id, target_size_gb).await;
+            #[cfg(target_os = "windows")]
+            Commands::ShrinkAndInstall { disk_id, partition_id, iso_path, linux_size_gb, boot_size_gb } => {
+                if let Err(e) = self.execute_shrink_workflow(
+                    disk_id, partition_id, iso_path, linux_size_gb, boot_size_gb
+                ).await {
+                    error!("FATAL: Shrink-and-Install workflow failed: {}", e);
+                }
             }
             Commands::Exit | Commands::Quit => {
                 println!("Exiting CLI...");
@@ -191,12 +210,97 @@ impl CliREPL {
         }
     }
 
-    async fn handle_shrink(&self, disk_id: &str, part_id: &str, target_size_gb: u32) {
-        println!("Attempting to shrink partition {} on disk {} to {} GB...", part_id, disk_id, target_size_gb);
+    #[cfg(target_os = "windows")]
+    async fn execute_shrink_workflow(
+        &self,
+        disk_id: String,
+        partition_id: String,
+        iso_path: String,
+        linux_size_gb: u32,
+        boot_size_gb: u32,
+    ) -> Result<(), DiskError> {
+        info!("Mounting and verifying ISO Payload: {}", iso_path);
+        let iso_drive_letter = IsoManager::mount_iso(&iso_path).await?;
         
-        match self.disk_manager.shrink_partition(disk_id, part_id, target_size_gb as u64).await {
-            Ok(_) => println!("Shrink operation completed successfully."),
-            Err(e) => eprintln!("Shrink operation failed: {}", e),
+        let is_bootable = IsoManager::verify_bootable_iso(&iso_drive_letter).await;
+        if !is_bootable {
+            let _ = IsoManager::dismount_iso(&iso_path).await;
+            return Err(DiskError::DataValidation("ISO is not bootable or missing EFI/boot configuration.".into()));
         }
+        
+        let workflow_result = async {
+            let gb_to_bytes = 1024_u64 * 1024 * 1024;
+            let required_free_space_bytes = (linux_size_gb as u64 + boot_size_gb as u64) * gb_to_bytes;
+            
+            info!("Fetching live volume parameters for {}...", disk_id);
+            let partitions = self.disk_manager.get_partitions(&disk_id).await?;
+            let target_part = partitions.iter().find(|p| p.id == partition_id)
+                .ok_or_else(|| DiskError::PartitionNotFound(partition_id.clone(), disk_id.clone()))?;
+                
+            if target_part.size_bytes <= required_free_space_bytes {
+                return Err(DiskError::InsufficientSpace { 
+                    required: (required_free_space_bytes / gb_to_bytes) as u32, 
+                    available: (target_part.size_bytes / gb_to_bytes) as u32 
+                });
+            }
+
+            let target_size_bytes = target_part.size_bytes - required_free_space_bytes;
+
+            info!("Shrinking NTFS partition {} to {} bytes...", partition_id, target_size_bytes);
+            self.disk_manager.shrink_partition(&disk_id, &partition_id, target_size_bytes).await?;
+            
+            info!("Recalculating Virtual Disk Offsets...");
+            let refreshed_partitions = self.disk_manager.get_partitions(&disk_id).await?;
+            let refreshed_target_part = refreshed_partitions.iter().find(|p| p.id == partition_id)
+                .ok_or_else(|| DiskError::PartitionNotFound(partition_id.clone(), disk_id.clone()))?;
+                
+            let target_offset_bytes = refreshed_target_part.offset_bytes + refreshed_target_part.size_bytes;
+            let payload_size_mb = linux_size_gb * 1024;
+
+            info!("Allocating native LINUX_LIVE & LINUX_EFI bounds at offset {}...", target_offset_bytes);
+            let disk_num = disk_id.parse::<u32>().map_err(|_| DiskError::DataValidation("Invalid Disk ID parameter".into()))?;
+            
+            // To invoke the native manager specific method we downcast or just cast back since we know the OS
+            // But since DiskManager is dynamic we need to make create_live_boot_partitions part of the trait
+            // Let's implement it inside the native manager and expose it if possible, or add it to trait.
+            // Since trait changes are annoying, I'll bypass by instantiating a new NativeDiskManager just for this
+            // Because NativeDiskManager requires debug_mode we'll pass false for now or fetch it.
+            let native_manager = NativeDiskManager::new(false)?;
+            
+            let (ntfs_letter, fat32_letter) = match native_manager.create_live_boot_partitions(
+                disk_num,
+                target_offset_bytes,
+                payload_size_mb
+            ).await {
+                Ok(letters) => letters,
+                Err(e) => return Err(e),
+            };
+
+            let post_creation_result = async {
+                info!("Cloning OS Payload: {} -> {}", iso_drive_letter, ntfs_letter);
+                PayloadManager::copy_payload(&iso_drive_letter, &ntfs_letter).await?;
+
+                info!("Injecting UEFI hooks -> {}", fat32_letter);
+                BootManager::install_uefi_driver(&fat32_letter).await?;
+
+                info!("Patching GRUB routing block...");
+                BootManager::patch_boot_configs(&ntfs_letter, "LINUX_LIVE").await?;
+                
+                Ok::<(), DiskError>(())
+            }.await;
+
+            if let Err(e) = post_creation_result {
+                error!("Saga failure detected. Executing explicit diskpart rollback...");
+                let _ = native_manager.rollback_live_partitions(disk_num).await;
+                return Err(e);
+            }
+
+            Ok(())
+        }.await;
+
+        info!("Detaching Virtual ISO Image...");
+        let _ = IsoManager::dismount_iso(&iso_path).await;
+
+        workflow_result
     }
 }

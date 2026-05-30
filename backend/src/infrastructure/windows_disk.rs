@@ -141,7 +141,7 @@ impl WindowsDiskManager {
         Ok(())
     }
 
-    async fn create_live_boot_partitions(
+    pub async fn create_live_boot_partitions(
         &self,
         disk_id: u32,
         target_offset_bytes: u64,

@@ -11,6 +11,8 @@ pub mod ipc;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     use clap::Parser;
+    tracing_subscriber::fmt::init();
+    
     let cli = cli::commands::IsekaiCli::parse();
 
     if cli.debug {
