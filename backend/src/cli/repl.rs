@@ -276,9 +276,11 @@ impl CliREPL {
                 Err(e) => return Err(e),
             };
 
+            let is_hdd = native_manager.is_mechanical_drive(disk_num).await.unwrap_or(false);
+
             let post_creation_result = async {
                 info!("Cloning OS Payload: {} -> {}", iso_drive_letter, ntfs_letter);
-                PayloadManager::copy_payload(&iso_drive_letter, &ntfs_letter).await?;
+                PayloadManager::copy_payload(&iso_drive_letter, &ntfs_letter, is_hdd).await?;
 
                 info!("Injecting UEFI hooks -> {}", fat32_letter);
                 BootManager::install_uefi_driver(&fat32_letter).await?;
@@ -291,7 +293,8 @@ impl CliREPL {
 
             if let Err(e) = post_creation_result {
                 error!("Saga failure detected. Executing explicit diskpart rollback...");
-                let _ = native_manager.rollback_live_partitions(disk_num).await;
+                let is_uefi = NativeDiskManager::is_uefi_host();
+                let _ = native_manager.rollback_live_partitions(disk_num, is_uefi).await;
                 return Err(e);
             }
 

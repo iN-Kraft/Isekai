@@ -13,10 +13,17 @@ use crate::domain::traits::DiskManager;
 use std::string::String;
 use std::sync::Arc;
 use std::time::Duration;
+use windows_sys::Win32::System::SystemInformation::{FirmwareTypeUefi, GetFirmwareType};
 
 const MSR_RESERVE_BYTES: u64 = 16 * 1024 * 1024;
 const PARTITION_ALIGNMENT_BYTES: u64 = 1024 * 1024;
 const TOTAL_PLACEMENT_OVERHEAD_BYTES: u64 = MSR_RESERVE_BYTES + PARTITION_ALIGNMENT_BYTES;
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "PascalCase")]
+struct MsftPhysicalDisk {
+    MediaType: Option<u16>
+}
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
@@ -87,10 +94,11 @@ impl WindowsDiskManager {
         })
     }
 
-    pub async fn rollback_live_partitions(&self, disk_id: u32) -> Result<(), DiskError> {
+    pub async fn rollback_live_partitions(&self, disk_id: u32, is_uefi: bool) -> Result<(), DiskError> {
         println!("ROLLBACK: Purging incomplete partitions on disk {}", disk_id);
 
-        let dp_script = format!("select disk {}\nclean\nconvert gpt\nexit\n", disk_id);
+        let partition_style = if is_uefi { "gpt" } else { "mbr" };
+        let dp_script = format!("select disk {}\nclean\nconvert {}\nexit\n", disk_id, partition_style);
         self.run_diskpart_script(&dp_script, format!("rollback_{}", disk_id)).await
     }
 
@@ -116,7 +124,7 @@ impl WindowsDiskManager {
         ))
     }
 
-    async fn wipe_disk(&self, disk_id: u32, os_disk_id: u32) -> Result<(), DiskError> {
+    async fn wipe_disk(&self, disk_id: u32, os_disk_id: u32, is_uefi: bool) -> Result<(), DiskError> {
         if disk_id == os_disk_id {
             return Err(DiskError::OsError(Error::new(
                 ErrorKind::PermissionDenied,
@@ -124,14 +132,15 @@ impl WindowsDiskManager {
             )));
         }
 
-        println!("== STRATEGY: WIPE DISK {} ==", disk_id);
+        let partition_style = if is_uefi { "gpt" } else { "mbr" };
+        println!("== STRATEGY: WIPE DISK {} (Style: {}) ==", disk_id, partition_style.to_uppercase());
 
         let dp_script = format!(
             "select disk {}\n\
              clean\n\
-             convert gpt\n\
+             convert {}\n\
              exit\n",
-            disk_id
+            disk_id, partition_style
         );
 
         self.run_diskpart_script(&dp_script, format!("wipe_{}", disk_id)).await?;
@@ -205,6 +214,26 @@ impl WindowsDiskManager {
         }
 
         Ok(())
+    }
+
+    pub fn is_uefi_host() -> bool {
+        let mut fw_type = 0;
+        unsafe {
+            let _ = GetFirmwareType(&mut fw_type);
+        }
+        fw_type == FirmwareTypeUefi
+    }
+
+    pub async fn is_mechanical_drive(&self, disk_id: u32) -> Result<bool, DiskError> {
+        let wmi_con = Arc::clone(&self.wmi_con);
+        let is_hdd = tokio::task::spawn_blocking(move || -> Result<bool, DiskError> {
+            let query = format!("SELECT MediaType FROM MSFT_PhysicalDisk WHERE DeviceId = '{}'", disk_id);
+            let result: Vec<MsftPhysicalDisk> = wmi_con.0.raw_query(&query).map_err(|e| DiskError::WmiError(format!("PhysicalDisk Query failed: {}", e)))?;
+
+            Ok(result.first().and_then(|d| d.MediaType) == Some(3))
+        }).await.map_err(|e| DiskError::DataValidation(format!("Thread Pool crashed: {}", e)))??;
+
+        Ok(is_hdd)
     }
 }
 

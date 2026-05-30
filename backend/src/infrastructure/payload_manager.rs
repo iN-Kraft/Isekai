@@ -6,11 +6,12 @@ use crate::domain::errors::DiskError;
 pub struct PayloadManager;
 
 impl PayloadManager {
-    pub async fn copy_payload(source_drive_letter: &str, target_drive_letter: &str) -> Result<(), DiskError> {
+    pub async fn copy_payload(source_drive_letter: &str, target_drive_letter: &str, is_hdd: bool) -> Result<(), DiskError> {
         let source = format!("{}:\\", source_drive_letter.trim_end_matches(':'));
         let target = format!("{}:\\", target_drive_letter.trim_end_matches(':'));
+        let mt_flag = if is_hdd { "/MT:1" } else { "/MT:8" };
 
-        println!("Starting high-speed payload copy from {} to {}", source, target);
+        println!("Starting high-speed payload copy from {} to {} (Mode: {})", source, target, mt_flag);
         println!("This may take a few minutes...");
 
         let output = Command::new("robocopy")
@@ -23,7 +24,7 @@ impl PayloadManager {
                 "/NP", // no progress
                 "/NFL", // no file list
                 "/NDL", // no directory list
-                "/MT:8" // multi-threading (8 threads)
+                mt_flag // multi-threading (8 threads)
             ])
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
