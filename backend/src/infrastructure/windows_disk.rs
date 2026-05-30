@@ -25,6 +25,7 @@ struct MsftDisk {
     IsSystem: Option<bool>,
     IsBoot: Option<bool>,
     BusType: Option<u16>,
+    PartitionStyle: Option<u16>
 }
 
 #[derive(Deserialize, Debug)]
@@ -44,6 +45,7 @@ struct MsftPartition {
 struct MsftVolume {
     DriveLetter: Option<String>,
     FileSystem: Option<String>,
+    SizeRemaining: Option<u64>
 }
 
 struct Gap {
@@ -417,7 +419,7 @@ impl DiskManager for WindowsDiskManager {
             })?;
 
             let results: Vec<MsftDisk> = wmi_con
-                .raw_query("SELECT Number, FriendlyName, Size, IsSystem, IsBoot, BusType FROM MSFT_Disk")
+                .raw_query("SELECT Number, FriendlyName, Size, IsSystem, IsBoot, BusType, PartitionStyle FROM MSFT_Disk")
                 .map_err(|e| DiskError::WmiError(format!("WMI Query failed: {}", e)))?;
 
             Ok(results)
@@ -426,25 +428,27 @@ impl DiskManager for WindowsDiskManager {
             let mut disks = Vec::with_capacity(wmi_disks.len());
 
             for wmi_disk in wmi_disks {
-            let bus_type = wmi_disk.BusType.unwrap_or(0);
-            let friendly_name = wmi_disk.FriendlyName.as_deref().unwrap_or("Unknown");
-            let is_virtual = bus_type == 14 || bus_type == 15 || friendly_name.to_lowercase().contains("virtual");
+                let bus_type = wmi_disk.BusType.unwrap_or(0);
+                let friendly_name = wmi_disk.FriendlyName.as_deref().unwrap_or("Unknown");
+                let is_virtual = bus_type == 14 || bus_type == 15 || friendly_name.to_lowercase().contains("virtual");
 
-            if is_virtual && !self.debug_mode {
-                continue;
-            }
+                if is_virtual && !self.debug_mode {
+                    continue;
+                }
 
-            let size_bytes = wmi_disk.Size.unwrap_or(0);
-            let size_gb = (size_bytes / 1024 / 1024 / 1024) as u32;
-            let is_sys = wmi_disk.IsSystem.unwrap_or(false) || wmi_disk.IsBoot.unwrap_or(false);
+                let size_bytes = wmi_disk.Size.unwrap_or(0);
+                let size_gb = (size_bytes / 1024 / 1024 / 1024) as u32;
+                let is_sys = wmi_disk.IsSystem.unwrap_or(false) || wmi_disk.IsBoot.unwrap_or(false);
+                let is_gpt = wmi_disk.PartitionStyle.unwrap_or(0) == 2;
 
-            disks.push(Disk {
-                stable_id: wmi_disk.Number.to_string(),
-                name: friendly_name.to_string(),
-                total_gb: size_gb,
-                free_gb: 0,
-                is_system_drive: is_sys,
-            });
+                disks.push(Disk {
+                    stable_id: wmi_disk.Number.to_string(),
+                    name: friendly_name.to_string(),
+                    total_gb: size_gb,
+                    free_gb: 0,
+                    is_system_drive: is_sys,
+                    is_gpt
+                });
             }
 
         disks.sort_by_key(|d| d.stable_id.parse::<u32>().unwrap_or(u32::MAX));
@@ -468,7 +472,7 @@ impl DiskManager for WindowsDiskManager {
                 .map_err(|e| DiskError::WmiError(format!("WMI Query failed: {}", e)))?;
 
             let volumes: Vec<MsftVolume> = wmi_con
-                .raw_query("SELECT DriveLetter, FileSystem FROM MSFT_Volume")
+                .raw_query("SELECT DriveLetter, FileSystem, SizeRemaining FROM MSFT_Volume")
                 .map_err(|e| DiskError::WmiError(format!("WMI Volume Query failed: {}", e)))?;
 
             Ok((results, volumes))
@@ -482,6 +486,7 @@ impl DiskManager for WindowsDiskManager {
 
             let mut fs = "Unknown".to_string();
             let mut drive_letter = None;
+            let mut free_bytes = 0;
             
             if let Some(dl) = &part.DriveLetter {
                 let trimmed = dl.trim_matches('\0').trim();
@@ -493,6 +498,9 @@ impl DiskManager for WindowsDiskManager {
                     }) {
                         if let Some(vol_fs) = &vol.FileSystem {
                             fs = vol_fs.clone();
+                        }
+                        if let Some(vol_free) = vol.SizeRemaining {
+                            free_bytes = vol_free;
                         }
                     }
                 }
@@ -512,6 +520,7 @@ impl DiskManager for WindowsDiskManager {
                 label,
                 offset_bytes: part.Offset.unwrap_or(0),
                 size_bytes: size_bytes,
+                free_bytes
             });
         }
 
@@ -519,14 +528,20 @@ impl DiskManager for WindowsDiskManager {
         Ok(partitions)
     }
 
-    async fn shrink_partition(&self, disk_id: &str, partition_id: &str, target_size_bytes: u32) -> Result<(), DiskError> {
+    async fn shrink_partition(&self, disk_id: &str, partition_id: &str, target_size_bytes: u64) -> Result<(), DiskError> {
+        let partitions = self.get_partitions_fresh(disk_id, Some(partition_id)).await?;
+        let target_part = partitions.iter().find(|p| p.id == partition_id).ok_or_else(|| DiskError::DiskNotFound(format!("Partition {} disappeared", partition_id)))?;
+
+        check_bitlocker_status(target_part.drive_letter.as_deref()).await?;
+
+        println!("Attempting primary shrink method: Resize-Partition");
         let cmd_str = format!("Resize-Partition -DiskNumber {} -PartitionNumber {} -Size {}", disk_id, partition_id, target_size_bytes);
         
         let output_fut = tokio::process::Command::new("powershell.exe")
             .args(["-NoProfile", "-NonInteractive", "-Command", &cmd_str])
             .output();
 
-        let output = tokio::time::timeout(std::time::Duration::from_secs(300), output_fut)
+        let ps_output = tokio::time::timeout(std::time::Duration::from_secs(300), output_fut)
             .await
             .map_err(|_| DiskError::OsError(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
@@ -534,30 +549,22 @@ impl DiskManager for WindowsDiskManager {
             )))?
             .map_err(DiskError::OsError)?;
 
-        // 3. Handle Errors
-        if !output.status.success() {
-            let stdout_err = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            let stderr_err = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            
-            let mut combined_err = String::new();
-            if !stdout_err.is_empty() {
-                combined_err.push_str(&stdout_err);
-            }
-            if !stderr_err.is_empty() {
-                if !combined_err.is_empty() {
-                    combined_err.push_str(" | ");
-                }
-                combined_err.push_str(&stderr_err);
-            }
-            if combined_err.is_empty() {
-                combined_err = "Unknown error occurred".to_string();
-            }
-
-            return Err(DiskError::OsError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("PowerShell Resize-Partition failed: {}", combined_err),
-            )));
+        if ps_output.status.success() {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            return Ok(());
         }
+
+        println!("Resize-Partition failed. Attempting robust diskpart fallback...");
+        let shrink_amount_bytes = target_part.size_bytes.saturating_sub(target_size_bytes);
+        let shrink_amount_mb = shrink_amount_bytes / (1024 * 1024);
+
+        let dp_script = format!(
+            "select disk {}\nselect partition {}\nshrink desired={}\nexit\n",
+            disk_id, partition_id, shrink_amount_bytes
+        );
+
+        self.run_diskpart_script(&dp_script, format!("shrink_{}_{}", disk_id, partition_id)).await?;
+        tokio::time::sleep(Duration::from_secs(10)).await;
 
         Ok(())
     }

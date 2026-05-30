@@ -8,6 +8,7 @@ pub struct Disk {
     pub total_gb: u32,
     pub free_gb: u32,
     pub is_system_drive: bool,
+    pub is_gpt: bool
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,7 +20,8 @@ pub struct Partition {
     pub file_system: String,
     pub label: String,
     pub offset_bytes: u64,
-    pub size_bytes: u64
+    pub size_bytes: u64,
+    pub free_bytes: u64
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
