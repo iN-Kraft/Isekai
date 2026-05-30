@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Debug mode enabled.");
     }
 
-    let disk_manager: Arc<dyn DiskManager> = Arc::new(NativeDiskManager::new(cli.debug));
+    let disk_manager: Arc<dyn DiskManager> = Arc::new(NativeDiskManager::new(cli.debug).expect("Failed to initialize disk manager"));
 
     if let Some(command) = cli.command {
         let repl = cli::repl::CliREPL::new(disk_manager);

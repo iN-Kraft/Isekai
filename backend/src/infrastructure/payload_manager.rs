@@ -13,7 +13,7 @@ impl PayloadManager {
         println!("Starting high-speed payload copy from {} to {}", source, target);
         println!("This may take a few minutes...");
 
-        let status = Command::new("robocopy")
+        let output = Command::new("robocopy")
             .args([
                 &source,
                 &target,
@@ -26,12 +26,12 @@ impl PayloadManager {
                 "/MT:8" // multi-threading (8 threads)
             ])
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
+            .stderr(Stdio::piped())
+            .output()
             .await
             .map_err(DiskError::OsError)?;
 
-        let exit_code = status.code().unwrap_or(-1);
+        let exit_code = output.status.code().unwrap_or(-1);
 
         // Microsoft Robocopy exit codes are non-standard:
         // 0 = No files copied (source and dest match)
@@ -39,9 +39,11 @@ impl PayloadManager {
         // 2-7 = Various success states with extra/mismatched files ignored
         // 8+ = Hard failure
         if exit_code >= 8 {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+
             return Err(DiskError::OsError(Error::new(
                 ErrorKind::Other,
-                format!("Robocopy failed with code {}.", exit_code)
+                format!("Robocopy failed with code {}. Reason: {}", exit_code, stderr)
             )));
         }
 

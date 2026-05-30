@@ -11,6 +11,7 @@ use crate::domain::errors::DiskError;
 use crate::domain::models::{Disk, InstallPlan, Partition};
 use crate::domain::traits::DiskManager;
 use std::string::String;
+use std::sync::Arc;
 use std::time::Duration;
 
 const MSR_RESERVE_BYTES: u64 = 16 * 1024 * 1024;
@@ -38,7 +39,7 @@ struct MsftPartition {
     Size: Option<u64>,
     DriveLetter: Option<String>,
     GptType: Option<String>,
-    Type: Option<u32>
+    MbrType: Option<u16>
 }
 
 #[derive(Deserialize, Debug)]
@@ -58,17 +59,39 @@ struct Gap {
 struct TempFileGuard(PathBuf);
 impl Drop for TempFileGuard {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
+        let path = self.0.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let _ = fs::remove_file(&path);
+        });
     }
 }
 
+struct SharedWmi(WMIConnection);
+unsafe impl Send for SharedWmi {}
+unsafe impl Sync for SharedWmi {}
+
 pub struct WindowsDiskManager {
     debug_mode: bool,
+    wmi_con: Arc<SharedWmi>,
 }
 
 impl WindowsDiskManager {
-    pub fn new(debug_mode: bool) -> Self {
-        Self { debug_mode }
+    pub fn new(debug_mode: bool) -> Result<Self, DiskError> {
+        let wmi_con = WMIConnection::with_namespace_path("ROOT\\Microsoft\\Windows\\Storage")
+            .map_err(|e| DiskError::WmiError(format!("Failed to initialize WMI: {}", e)))?;
+
+        Ok(Self {
+            debug_mode,
+            wmi_con: Arc::new(SharedWmi(wmi_con))
+        })
+    }
+
+    pub async fn rollback_live_partitions(&self, disk_id: u32) -> Result<(), DiskError> {
+        println!("ROLLBACK: Purging incomplete partitions on disk {}", disk_id);
+
+        let dp_script = format!("select disk {}\nclean\nconvert gpt\nexit\n", disk_id);
+        self.run_diskpart_script(&dp_script, format!("rollback_{}", disk_id)).await
     }
 
     async fn get_partitions_fresh(
@@ -164,7 +187,7 @@ impl WindowsDiskManager {
         let script_path = temp_dir.join(format!("dp_{}.txt", identifier));
         let _guard = TempFileGuard(script_path.clone());
 
-        fs::write(&script_path, script_content).map_err(DiskError::OsError)?;
+        tokio::fs::write(&script_path, script_content).await.map_err(DiskError::OsError)?;
 
         let output = tokio::process::Command::new("diskpart")
             .args(["/s", script_path.to_str().unwrap()])
@@ -185,7 +208,7 @@ impl WindowsDiskManager {
     }
 }
 
-fn determine_partition_label(drive_letter: Option<&str>, gpt_type: Option<&str>, part_type: Option<u32>) -> String {
+fn determine_partition_label(drive_letter: Option<&str>, gpt_type: Option<&str>, mbr_type: Option<u16>) -> String {
     if let Some(dl) = drive_letter {
         let trimmed = dl.trim_matches('\0').trim();
         if trimmed == "C" {
@@ -206,8 +229,8 @@ fn determine_partition_label(drive_letter: Option<&str>, gpt_type: Option<&str>,
         }
     }
 
-    if let Some(pt) = part_type {
-        if pt == 4 {
+    if let Some(pt) = mbr_type {
+        if pt == 4 || pt == 39 {
             return "Recovery".to_string();
         }
     }
@@ -415,14 +438,11 @@ async fn create_uefi_boot_entry(
 #[async_trait]
 impl DiskManager for WindowsDiskManager {
     async fn get_disks(&self) -> Result<Vec<Disk>, DiskError> {
-        let wmi_disks = tokio::task::spawn_blocking(|| -> Result<Vec<MsftDisk>, DiskError> {
-            let wmi_con = WMIConnection::with_namespace_path("ROOT\\Microsoft\\Windows\\Storage").map_err(|e| {
-                DiskError::WmiError(format!("WMI Connection failed: {}", e))
-            })?;
-
-            let results: Vec<MsftDisk> = wmi_con
-                .raw_query("SELECT Number, FriendlyName, Size, IsSystem, IsBoot, BusType, PartitionStyle FROM MSFT_Disk")
-                .map_err(|e| DiskError::WmiError(format!("WMI Query failed: {}", e)))?;
+        let wmi_con = Arc::clone(&self.wmi_con);
+        let wmi_disks = tokio::task::spawn_blocking(move || -> Result<Vec<MsftDisk>, DiskError> {
+            let results: Vec<MsftDisk> = wmi_con.0
+                .raw_query("SELECT * FROM MSFT_Disk")
+                .map_err(|e| DiskError::WmiError(format!("WMI Query failed for Disk: {}", e)))?;
 
             Ok(results)
             }).await.map_err(|e| DiskError::DataValidation(format!("Thread Pool crashed: {}", e)))??;
@@ -461,20 +481,17 @@ impl DiskManager for WindowsDiskManager {
         let disk_index: u32 = disk_id.parse().map_err(|_| {
             DiskError::DiskNotFound(disk_id.to_string())
         })?;
+        let wmi_con = Arc::clone(&self.wmi_con);
 
         let (wmi_parts, volumes) = tokio::task::spawn_blocking(move || -> Result<(Vec<MsftPartition>, Vec<MsftVolume>), DiskError> {
-            let wmi_con = WMIConnection::with_namespace_path("ROOT\\Microsoft\\Windows\\Storage").map_err(|e| {
-                DiskError::WmiError(format!("WMI Connection failed: {}", e))
-            })?;
+            let query = format!("SELECT * FROM MSFT_Partition WHERE DiskNumber = {}", disk_index);
 
-            let query = format!("SELECT DiskNumber, PartitionNumber, Offset, Size, DriveLetter, GptType, Type FROM MSFT_Partition WHERE DiskNumber = {}", disk_index);
-
-            let results: Vec<MsftPartition> = wmi_con
+            let results: Vec<MsftPartition> = wmi_con.0
                 .raw_query(&query)
-                .map_err(|e| DiskError::WmiError(format!("WMI Query failed: {}", e)))?;
+                .map_err(|e| DiskError::WmiError(format!("WMI Query failed for Partition: {}", e)))?;
 
-            let volumes: Vec<MsftVolume> = wmi_con
-                .raw_query("SELECT DriveLetter, FileSystem, SizeRemaining FROM MSFT_Volume")
+            let volumes: Vec<MsftVolume> = wmi_con.0
+                .raw_query("SELECT * FROM MSFT_Volume")
                 .map_err(|e| DiskError::WmiError(format!("WMI Volume Query failed: {}", e)))?;
 
             Ok((results, volumes))
@@ -511,7 +528,7 @@ impl DiskManager for WindowsDiskManager {
             let label = determine_partition_label(
                 part.DriveLetter.as_deref(),
                 part.GptType.as_deref(),
-                part.Type
+                part.MbrType
             );
 
             partitions.push(Partition {
