@@ -1,5 +1,7 @@
 #![allow(non_snake_case)]
 
+use std::env::temp_dir;
+use std::fs;
 use std::io::{Error, ErrorKind};
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -85,6 +87,97 @@ impl WindowsDiskManager {
         }
 
         Ok(partitions_retry)
+    }
+
+    async fn wipe_disk(&self, disk_id: u32, os_disk_id: u32) -> Result<(), DiskError> {
+        if disk_id == os_disk_id {
+            return Err(DiskError::OsError(Error::new(
+                ErrorKind::PermissionDenied,
+                "SECURITY LOCKOUT: Refusing to wipe the disk containing the active Windows OS."
+            )));
+        }
+
+        println!("== STRATEGY: WIPE DISK {} ==", disk_id);
+
+        let dp_script = format!(
+            "select disk {}\n\
+             clean\n\
+             convert gpt\n\
+             exit\n",
+            disk_id
+        );
+
+        self.run_diskpart_script(&dp_script, format!("wipe_{}", disk_id)).await?;
+
+        tokio::time::sleep(Duration::from_secs(3)).await;
+
+        Ok(())
+    }
+
+    async fn create_live_boot_partitions(
+        &self,
+        disk_id: u32,
+        target_offset_bytes: u64,
+        iso_payload_size_mb: u32
+    ) -> Result<(String, String), DiskError> {
+        let offset_kb = target_offset_bytes / 1024;
+        let efi_driver_size_mb = 15;
+        let dp_script = format!(
+            "select disk {}\n\
+            create partition primary size={} offset={}\n\
+            format fs=ntfs quick label=\"LINUX_LIVE\"\n\
+            assign\n\
+            create partition primary size={}\n\
+            format fs=fat32 quick label=\"LINUX_EFI\"\n\
+            assign\n\
+            exit\n",
+            disk_id, iso_payload_size_mb, offset_kb, efi_driver_size_mb
+        );
+
+        println!("Creating Live Boot Partitions (NTFS Payload + FAT32 Driver Hook)...");
+        self.run_diskpart_script(&dp_script, format!("create_live_{}", disk_id)).await?;
+
+        tokio::time::sleep(Duration::from_secs(4)).await;
+
+        let fresh_parts = self.get_partitions(&disk_id.to_string()).await?;
+        let ntfs_letter = fresh_parts.iter()
+            .find(|p| p.label.contains("LINUX_LIVE"))
+            .and_then(|p| p.drive_letter.clone())
+            .ok_or_else(|| DiskError::DiskNotFound("Failed to mount NTFS Payload partition".into()))?;
+
+        let fat32_letter = fresh_parts.iter()
+            .find(|p| p.label.contains("LINUX_EFI"))
+            .and_then(|p| p.drive_letter.clone())
+            .ok_or_else(|| DiskError::DiskNotFound("Failed to mount FAT32 EFI partition".into()))?;
+
+        println!("Partitions created! Payload: {}: | UEFI Hook: {}:", ntfs_letter, fat32_letter);
+
+        Ok((ntfs_letter, fat32_letter))
+    }
+
+    async fn run_diskpart_script(&self, script_content: &str, identifier: String) -> Result<(), DiskError> {
+        let temp_dir = temp_dir();
+        let script_path = temp_dir.join(format!("dp_{}.txt", identifier));
+
+        fs::write(&script_path, script_content).map_err(DiskError::OsError)?;
+
+        let output = tokio::process::Command::new("diskpart")
+            .args(["/s", script_path.to_str().unwrap()])
+            .output()
+            .await
+            .map_err(DiskError::OsError)?;
+
+        let _ = fs::remove_file(script_path);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        if !stdout.to_lowercase().contains("successfully") {
+            return Err(DiskError::OsError(Error::new(
+                ErrorKind::Other,
+                format!("DiskPart execution failed:\n{}", stdout)
+            )));
+        }
+
+        Ok(())
     }
 }
 
