@@ -19,7 +19,11 @@ which = "8.0.2"
 tokio-util = { version = "0.7.18", features = ["codec"] }
 futures = "0.3.32"
 regex = "1.12.3"
+embed-resource = "3.0.9"
 
 [profile.dev]
 strip = "debuginfo"
 opt-level = 1
+
+[build-dependencies]
+embed-resource = "3.0.9"
