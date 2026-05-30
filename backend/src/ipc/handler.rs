@@ -53,7 +53,7 @@ pub async fn process_request(
                 percent: Some(10)
             })).await;
 
-            match disk_manager.shrink_partition(&disk_id, &partition_id, target_size_gb).await {
+            match disk_manager.shrink_partition(&disk_id, &partition_id, target_size_gb as u64).await {
                 Ok(_) => {
                     let _ = tx.send(OutgoingMessage::Event(IpcEvent {
                         event_type: "progress".to_string(),

@@ -3,6 +3,7 @@
 use std::env::temp_dir;
 use std::fs;
 use std::io::{Error, ErrorKind};
+use std::path::PathBuf;
 use async_trait::async_trait;
 use serde::Deserialize;
 use wmi::WMIConnection;
@@ -54,6 +55,13 @@ struct Gap {
     size: u64
 }
 
+struct TempFileGuard(PathBuf);
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
 pub struct WindowsDiskManager {
     debug_mode: bool,
 }
@@ -68,27 +76,21 @@ impl WindowsDiskManager {
         disk_id: &str,
         expected_partition_id: Option<&str>
     ) -> Result<Vec<Partition>, DiskError> {
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        let mut delays = vec![500, 1000, 2000, 3000, 5000];
 
-        let partitions = self.get_partitions(disk_id).await?;
+        for delay in delays {
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+            let partitions = self.get_partitions(disk_id).await?;
 
-        if expected_partition_id.is_none() || partitions.iter().any(|p| p.id == expected_partition_id.unwrap()) {
-            return Ok(partitions);
+            if expected_partition_id.is_none() || partitions.iter().any(|p| p.id == expected_partition_id.unwrap()) {
+                return Ok(partitions);
+            }
+            println!("Partition not found yet. Retrying in WMI sync loop...");
         }
 
-        let target_id = expected_partition_id.unwrap();
-        println!("Partition {} not found yet. Waiting 2 seconds for OS WMI sync...", target_id);
-        tokio::time::sleep(Duration::from_secs(2)).await;
-
-        let partitions_retry = self.get_partitions(disk_id).await?;
-
-        if !partitions_retry.iter().any(|p| p.id == target_id) {
-            return Err(DiskError::DiskNotFound(
-                format!("Partition {} did not appear in WMI after sync delays.", target_id)
-            ));
-        }
-
-        Ok(partitions_retry)
+        Err(DiskError::DiskNotFound(
+            format!("Partition {:?} did not appear in WMI after sync delays.", expected_partition_id)
+        ))
     }
 
     async fn wipe_disk(&self, disk_id: u32, os_disk_id: u32) -> Result<(), DiskError> {
@@ -160,6 +162,7 @@ impl WindowsDiskManager {
     async fn run_diskpart_script(&self, script_content: &str, identifier: String) -> Result<(), DiskError> {
         let temp_dir = temp_dir();
         let script_path = temp_dir.join(format!("dp_{}.txt", identifier));
+        let _guard = TempFileGuard(script_path.clone());
 
         fs::write(&script_path, script_content).map_err(DiskError::OsError)?;
 
@@ -169,7 +172,6 @@ impl WindowsDiskManager {
             .await
             .map_err(DiskError::OsError)?;
 
-        let _ = fs::remove_file(script_path);
         let stdout = String::from_utf8_lossy(&output.stdout);
 
         if !stdout.to_lowercase().contains("successfully") {
@@ -214,7 +216,7 @@ fn determine_partition_label(drive_letter: Option<&str>, gpt_type: Option<&str>,
 }
 
 fn calculate_required_shrink_bytes(linux_size_gb: u32, boot_size_gb: u32) -> u64 {
-    let gb_to_bytes = 1024 * 1024 * 1024;
+    let gb_to_bytes = 1024_u64 * 1024 * 1024;
     let linux_bytes = (linux_size_gb as u64) * gb_to_bytes;
     let boot_bytes = (boot_size_gb as u64) * gb_to_bytes;
 
@@ -286,7 +288,7 @@ fn get_contiguous_install_plan(
         None => return result
     };
 
-    let boot_end = chosen_gap.end - MSR_RESERVE_BYTES;
+    let boot_end = chosen_gap.end.saturating_sub(MSR_RESERVE_BYTES);
     let raw_boot_offset = boot_end.saturating_sub(boot_size_bytes);
     let boot_partition_offset = (raw_boot_offset / PARTITION_ALIGNMENT_BYTES) * PARTITION_ALIGNMENT_BYTES;
 

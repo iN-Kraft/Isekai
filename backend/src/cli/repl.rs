@@ -194,7 +194,7 @@ impl CliREPL {
     async fn handle_shrink(&self, disk_id: &str, part_id: &str, target_size_gb: u32) {
         println!("Attempting to shrink partition {} on disk {} to {} GB...", part_id, disk_id, target_size_gb);
         
-        match self.disk_manager.shrink_partition(disk_id, part_id, target_size_gb).await {
+        match self.disk_manager.shrink_partition(disk_id, part_id, target_size_gb as u64).await {
             Ok(_) => println!("Shrink operation completed successfully."),
             Err(e) => eprintln!("Shrink operation failed: {}", e),
         }

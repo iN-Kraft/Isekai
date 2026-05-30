@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::path::Path;
 use regex::{Captures, Regex};
 use tokio::fs;
@@ -95,19 +96,22 @@ impl BootManager {
                 }
             };
 
-            let mut new_content = original_content.clone();
+            let mut current_content = original_content;
+            let mut file_was_patched = false;
 
             for regex in &patterns {
-                new_content = regex.replace_all(&new_content, |caps: &Captures| {
+                if let Cow::Owned(new_string) = regex.replace_all(&current_content, |caps: &Captures| {
                     let prefix = caps.get(1).map_or("", |m| m.as_str());
                     let suffix = caps.get(2).map_or("", |m| m.as_str());
-
                     format!("{}{}{}", prefix, new_label, suffix)
-                }).to_string();
+                }) {
+                    current_content = new_string;
+                    file_was_patched = true;
+                }
             }
 
-            if new_content != original_content {
-                if let Err(e) = fs::write(&file_path, new_content).await {
+            if file_was_patched {
+                if let Err(e) = fs::write(&file_path, &current_content).await {
                     println!("Warning: Failed to save patched config {:?} - {}", file_path.file_name().unwrap(), e);
                 } else {
                     println!("Patched boot config: {:?}", file_path.file_name().unwrap());
@@ -117,7 +121,6 @@ impl BootManager {
         }
 
         println!("Successfully patched {} boot config file(s) with label '{}'", patched_count, new_label);
-
         Ok(patched_count)
     }
 }

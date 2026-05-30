@@ -1,4 +1,5 @@
 use std::io::{Error, ErrorKind};
+use std::process::Stdio;
 use tokio::process::Command;
 use crate::domain::errors::DiskError;
 
@@ -12,7 +13,7 @@ impl PayloadManager {
         println!("Starting high-speed payload copy from {} to {}", source, target);
         println!("This may take a few minutes...");
 
-        let output = Command::new("robocopy")
+        let status = Command::new("robocopy")
             .args([
                 &source,
                 &target,
@@ -24,11 +25,13 @@ impl PayloadManager {
                 "/NDL", // no directory list
                 "/MT:8" // multi-threading (8 threads)
             ])
-            .output()
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
             .await
             .map_err(DiskError::OsError)?;
 
-        let exit_code = output.status.code().unwrap_or(-1);
+        let exit_code = status.code().unwrap_or(-1);
 
         // Microsoft Robocopy exit codes are non-standard:
         // 0 = No files copied (source and dest match)
@@ -36,11 +39,9 @@ impl PayloadManager {
         // 2-7 = Various success states with extra/mismatched files ignored
         // 8+ = Hard failure
         if exit_code >= 8 {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stdout = String::from_utf8_lossy(&output.stdout);
             return Err(DiskError::OsError(Error::new(
                 ErrorKind::Other,
-                format!("Robocopy failed with code {}.\nOut: {}\nErr: {}", exit_code, stdout, stderr)
+                format!("Robocopy failed with code {}.", exit_code)
             )));
         }
 
@@ -55,13 +56,15 @@ impl PayloadManager {
         println!("Stripping read-only attributes from copied files...");
 
         let target_glob = format!("{}*.*", target_path);
-        let output = Command::new("attrib")
+        let status = Command::new("attrib")
             .args(["-R", &target_glob, "/S", "/D"])
-            .output()
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
             .await
             .map_err(DiskError::OsError)?;
 
-        if !output.status.success() {
+        if !status.success() {
             println!("Note: Some systems files denied attribute changes (this is normal).");
         } else {
             println!("Read-only attributes removed.");
