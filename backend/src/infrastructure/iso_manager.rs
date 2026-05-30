@@ -1,3 +1,4 @@
+use std::fs;
 use std::io::{Error, ErrorKind};
 use std::path::Path;
 use tokio::process::Command;
@@ -8,7 +9,7 @@ pub struct IsoManager;
 impl IsoManager {
     pub async fn mount_iso(iso_path: &str) -> Result<String, DiskError> {
         let ps_script = format!(
-            "$$vol = (Mount-DiskImage -ImagePath '{}' -StorageType ISO -PassThru | Get-Volume -ErrorAction Stop | Select-Object -First 1); if ($vol) {{ Write-Output $vol.DriveLetter }}",
+            "$vol = (Mount-DiskImage -ImagePath '{}' -StorageType ISO -PassThru | Get-Volume -ErrorAction Stop | Select-Object -First 1); if ($vol) {{ Write-Output $vol.DriveLetter }}",
             iso_path
         );
 
@@ -50,10 +51,26 @@ impl IsoManager {
     }
 
     pub async fn verify_bootable_iso(drive_letter: &str) -> bool {
-        let indicators = ["isolinux", "boot", "EFI", "casper", "live", "squashfs"];
-        let base_path = format!("{}:\\", drive_letter);
+        let indicators = ["isolinux", "boot", "EFI", "efi", "casper", "live", "squashfs"];
+        let clean_letter = drive_letter.trim_matches(|c| c == '\\' || c == '/' || c == ':');
+        let base_path = format!("{}:\\", clean_letter);
+
+        println!("DEBUG: Verifying ISO at base path: [{}]", base_path);
 
         let exists = tokio::task::spawn_blocking(move || {
+            println!("DEBUG: Directory listing for [{}]:", base_path);
+            match fs::read_dir(&base_path) {
+                Ok(entries) => {
+                    for entry in entries.flatten() {
+                        println!("  -> {:?}", entry.file_name());
+                    }
+                }
+                Err(e) => {
+                    println!("DEBUG: FATAL: Rust cannot read the root directory of {}! Error: {}", base_path, e);
+                    println!("DEBUG: If the error is 'System cannot find the path specified', this is UAC Drive Isolation.");
+                }
+            }
+
             for indicator in indicators {
                 let check_path = Path::new(&base_path).join(indicator);
                 if check_path.exists() {

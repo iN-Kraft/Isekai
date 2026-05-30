@@ -54,7 +54,8 @@ struct MsftPartition {
 struct MsftVolume {
     DriveLetter: Option<String>,
     FileSystem: Option<String>,
-    SizeRemaining: Option<u64>
+    SizeRemaining: Option<u64>,
+    FileSystemLabel: Option<String>
 }
 
 struct Gap {
@@ -94,11 +95,18 @@ impl WindowsDiskManager {
         })
     }
 
-    pub async fn rollback_live_partitions(&self, disk_id: u32, is_uefi: bool) -> Result<(), DiskError> {
+    pub async fn rollback_live_partitions(&self, disk_id: u32, _is_uefi: bool) -> Result<(), DiskError> {
         println!("ROLLBACK: Purging incomplete partitions on disk {}", disk_id);
 
-        let partition_style = if is_uefi { "gpt" } else { "mbr" };
-        let dp_script = format!("select disk {}\nclean\nconvert {}\nexit\n", disk_id, partition_style);
+        let dp_script = format!(
+            "select disk {}\n\
+            select volume LINUX_LIVE\n\
+            delete volume\n\
+            select volume LINUX_EFI\n\
+            delete volume\n\
+            exit\n",
+            disk_id
+        );
         self.run_diskpart_script(&dp_script, format!("rollback_{}", disk_id)).await
     }
 
@@ -107,7 +115,7 @@ impl WindowsDiskManager {
         disk_id: &str,
         expected_partition_id: Option<&str>
     ) -> Result<Vec<Partition>, DiskError> {
-        let mut delays = vec![500, 1000, 2000, 3000, 5000];
+        let delays = vec![500, 1000, 2000, 3000, 5000];
 
         for delay in delays {
             tokio::time::sleep(Duration::from_millis(delay)).await;
@@ -153,40 +161,72 @@ impl WindowsDiskManager {
     pub async fn create_live_boot_partitions(
         &self,
         disk_id: u32,
-        target_offset_bytes: u64,
-        iso_payload_size_mb: u32
-    ) -> Result<(String, String), DiskError> {
-        let offset_kb = target_offset_bytes / 1024;
-        let efi_driver_size_mb = 15;
-        let dp_script = format!(
-            "select disk {}\n\
-            create partition primary size={} offset={}\n\
-            format fs=ntfs quick label=\"LINUX_LIVE\"\n\
-            assign\n\
-            create partition primary size={}\n\
-            format fs=fat32 quick label=\"LINUX_EFI\"\n\
-            assign\n\
-            exit\n",
-            disk_id, iso_payload_size_mb, offset_kb, efi_driver_size_mb
-        );
+        _target_offset_bytes: u64,
+        iso_payload_size_mb: u32,
+        is_uefi: bool
+    ) -> Result<(String, Option<String>), DiskError> {
+        let efi_driver_size_mb = 50;
+        let dp_script = if is_uefi {
+            format!(
+                "select disk {}\n\
+                create partition primary size={}\n\
+                format fs=ntfs quick label=\"LINUX_LIVE\"\n\
+                assign\n\
+                create partition primary size={}\n\
+                format fs=fat32 quick label=\"LINUX_EFI\"\n\
+                assign\n\
+                exit\n",
+                disk_id, iso_payload_size_mb, efi_driver_size_mb
+            )
+        } else {
+            println!("Legacy BIOS detected. Skipping FAT32 EFI partition creation to respect MBR limits.");
+            format!(
+                "select disk {}\n\
+                create partition primary size={}\n\
+                format fs=ntfs quick label=\"LINUX_LIVE\"\n\
+                assign\n\
+                exit\n",
+                disk_id, iso_payload_size_mb
+            )
+        };
 
-        println!("Creating Live Boot Partitions (NTFS Payload + FAT32 Driver Hook)...");
+        println!("Creating Live Boot Partitions (NTFS Payload{})...", if is_uefi { " + FAT32 Driver Hook" } else { "" });
         self.run_diskpart_script(&dp_script, format!("create_live_{}", disk_id)).await?;
 
-        tokio::time::sleep(Duration::from_secs(4)).await;
+        let mut ntfs_letter = None;
+        let mut fat32_letter = None;
 
-        let fresh_parts = self.get_partitions(&disk_id.to_string()).await?;
-        let ntfs_letter = fresh_parts.iter()
-            .find(|p| p.label.contains("LINUX_LIVE"))
-            .and_then(|p| p.drive_letter.clone())
-            .ok_or_else(|| DiskError::DiskNotFound("Failed to mount NTFS Payload partition".into()))?;
+        println!("Waiting for Windows VDS to map drive letters...");
 
-        let fat32_letter = fresh_parts.iter()
-            .find(|p| p.label.contains("LINUX_EFI"))
-            .and_then(|p| p.drive_letter.clone())
-            .ok_or_else(|| DiskError::DiskNotFound("Failed to mount FAT32 EFI partition".into()))?;
+        for _ in 0..6 {
+            tokio::time::sleep(Duration::from_secs(2)).await;
 
-        println!("Partitions created! Payload: {}: | UEFI Hook: {}:", ntfs_letter, fat32_letter);
+            let fresh_parts = self.get_partitions(&disk_id.to_string()).await?;
+
+            if ntfs_letter.is_none() {
+                ntfs_letter = fresh_parts.iter()
+                    .find(|p| p.label.contains("LINUX_LIVE"))
+                    .and_then(|p| p.drive_letter.clone());
+            }
+
+            if is_uefi && fat32_letter.is_none() {
+                fat32_letter = fresh_parts.iter()
+                    .find(|p| p.label.contains("LINUX_EFI"))
+                    .and_then(|p| p.drive_letter.clone());
+            }
+
+            if ntfs_letter.is_some() && (!is_uefi || fat32_letter.is_some()) {
+                break;
+            }
+        }
+
+        let ntfs_letter = ntfs_letter.ok_or_else(|| DiskError::DiskNotFound("Failed to mount NTFS Payload partition. WMI timeout.".into()))?;
+
+        if is_uefi && fat32_letter.is_none() {
+            return Err(DiskError::DiskNotFound("Failed to mount FAT32 EFI partition. WMI timeout.".into()));
+        }
+
+        println!("Partitions created! Payload: {}: | UEFI Hook: {:?}", ntfs_letter, fat32_letter);
 
         Ok((ntfs_letter, fat32_letter))
     }
@@ -267,10 +307,10 @@ fn determine_partition_label(drive_letter: Option<&str>, gpt_type: Option<&str>,
     return "Partition".to_string();
 }
 
-fn calculate_required_shrink_bytes(linux_size_gb: u32, boot_size_gb: u32) -> u64 {
-    let gb_to_bytes = 1024_u64 * 1024 * 1024;
-    let linux_bytes = (linux_size_gb as u64) * gb_to_bytes;
-    let boot_bytes = (boot_size_gb as u64) * gb_to_bytes;
+fn calculate_required_shrink_bytes(linux_size_mb: u32, boot_size_mb: u32) -> u64 {
+    let mb_to_bytes = 1024_u64 * 1024;
+    let linux_bytes = (linux_size_mb as u64) * mb_to_bytes;
+    let boot_bytes = (boot_size_mb as u64) * mb_to_bytes;
 
     return linux_bytes + boot_bytes + TOTAL_PLACEMENT_OVERHEAD_BYTES;
 }
@@ -279,8 +319,8 @@ fn get_contiguous_install_plan(
     disk_size_bytes: u64,
     partitions: &[Partition],
     anchor_end_bytes: u64,
-    boot_size_gb: u32,
-    linux_size_gb: u32
+    boot_size_mb: u32,
+    linux_size_mb: u32
 ) -> InstallPlan {
     let mut gaps = Vec::new();
     let mut prev_end: u64 = 0;
@@ -310,7 +350,7 @@ fn get_contiguous_install_plan(
         }
     }
 
-    let boot_size_bytes = (boot_size_gb as u64) * 1024 * 1024 * 1024;
+    let boot_size_bytes = (boot_size_mb as u64) * 1024 * 1024;
     let min_gap_required = boot_size_bytes + TOTAL_PLACEMENT_OVERHEAD_BYTES;
     let usable_gaps: Vec<&Gap> = gaps.iter().filter(|g| g.size >= min_gap_required).collect();
     let mut result = InstallPlan {
@@ -349,7 +389,7 @@ fn get_contiguous_install_plan(
     }
 
     let linux_space = boot_partition_offset - chosen_gap.start;
-    let requested_linux_bytes = (linux_size_gb as u64) * 1024 * 1024 * 1024;
+    let requested_linux_bytes = (linux_size_mb as u64) * 1024 * 1024;
 
     result.has_boot_space = true;
     result.has_requested_linux_space = linux_space >= requested_linux_bytes;
@@ -535,6 +575,7 @@ impl DiskManager for WindowsDiskManager {
             let mut fs = "Unknown".to_string();
             let mut drive_letter = None;
             let mut free_bytes = 0;
+            let mut vol_label_str = None;
             
             if let Some(dl) = &part.DriveLetter {
                 let trimmed = dl.trim_matches('\0').trim();
@@ -550,15 +591,18 @@ impl DiskManager for WindowsDiskManager {
                         if let Some(vol_free) = vol.SizeRemaining {
                             free_bytes = vol_free;
                         }
+                        if let Some(lbl) = &vol.FileSystemLabel {
+                            vol_label_str = Some(lbl.clone());
+                        }
                     }
                 }
             }
 
-            let label = determine_partition_label(
+            let label = vol_label_str.unwrap_or_else(|| determine_partition_label(
                 part.DriveLetter.as_deref(),
                 part.GptType.as_deref(),
                 part.MbrType
-            );
+            ));
 
             partitions.push(Partition {
                 id: part.PartitionNumber.to_string(),
@@ -608,7 +652,7 @@ impl DiskManager for WindowsDiskManager {
 
         let dp_script = format!(
             "select disk {}\nselect partition {}\nshrink desired={}\nexit\n",
-            disk_id, partition_id, shrink_amount_bytes
+            disk_id, partition_id, shrink_amount_mb
         );
 
         self.run_diskpart_script(&dp_script, format!("shrink_{}_{}", disk_id, partition_id)).await?;

@@ -46,9 +46,9 @@ impl CliREPL {
                 self.handle_parts(&disk_id).await;
             }
             #[cfg(target_os = "windows")]
-            Commands::ShrinkAndInstall { disk_id, partition_id, iso_path, linux_size_gb, boot_size_gb } => {
+            Commands::ShrinkAndInstall { disk_id, partition_id, iso_path, boot_size_mb } => {
                 if let Err(e) = self.execute_shrink_workflow(
-                    disk_id, partition_id, iso_path, linux_size_gb, boot_size_gb
+                    disk_id, partition_id, iso_path, boot_size_mb
                 ).await {
                     error!("FATAL: Shrink-and-Install workflow failed: {}", e);
                 }
@@ -216,21 +216,31 @@ impl CliREPL {
         disk_id: String,
         partition_id: String,
         iso_path: String,
-        linux_size_gb: u32,
-        boot_size_gb: u32,
+        boot_size_mb: u32,
     ) -> Result<(), DiskError> {
-        info!("Mounting and verifying ISO Payload: {}", iso_path);
-        let iso_drive_letter = IsoManager::mount_iso(&iso_path).await?;
+        let is_pre_mounted = iso_path.len() <= 3 && (iso_path.ends_with(':') || iso_path.ends_with(":\\"));
+        let iso_drive_letter = if is_pre_mounted {
+            let letter = iso_path.trim_end_matches('\\').to_string();
+            info!("Using pre-mounted ISO on drive: {}", letter);
+            letter
+        } else {
+            info!("Mounting ISO Payload: {}", iso_path);
+            IsoManager::mount_iso(&iso_path).await?
+        };
         
         let is_bootable = IsoManager::verify_bootable_iso(&iso_drive_letter).await;
         if !is_bootable {
-            let _ = IsoManager::dismount_iso(&iso_path).await;
+            if !is_pre_mounted {
+                let _ = IsoManager::dismount_iso(&iso_path).await;
+            }
             return Err(DiskError::DataValidation("ISO is not bootable or missing EFI/boot configuration.".into()));
         }
         
         let workflow_result = async {
-            let gb_to_bytes = 1024_u64 * 1024 * 1024;
-            let required_free_space_bytes = (linux_size_gb as u64 + boot_size_gb as u64) * gb_to_bytes;
+            let mb_to_bytes = 1024_u64 * 1024;
+            let alignment_buffer_mb = 20;
+            let total_shrink_mb = boot_size_mb + alignment_buffer_mb;
+            let required_free_space_bytes = (total_shrink_mb as u64) * mb_to_bytes;
             
             info!("Fetching live volume parameters for {}...", disk_id);
             let partitions = self.disk_manager.get_partitions(&disk_id).await?;
@@ -239,8 +249,8 @@ impl CliREPL {
                 
             if target_part.size_bytes <= required_free_space_bytes {
                 return Err(DiskError::InsufficientSpace { 
-                    required: (required_free_space_bytes / gb_to_bytes) as u32, 
-                    available: (target_part.size_bytes / gb_to_bytes) as u32 
+                    required: (required_free_space_bytes / mb_to_bytes) as u32, 
+                    available: (target_part.size_bytes / mb_to_bytes) as u32 
                 });
             }
 
@@ -255,22 +265,24 @@ impl CliREPL {
                 .ok_or_else(|| DiskError::PartitionNotFound(partition_id.clone(), disk_id.clone()))?;
                 
             let target_offset_bytes = refreshed_target_part.offset_bytes + refreshed_target_part.size_bytes;
-            let payload_size_mb = linux_size_gb * 1024;
+            let disk_num = disk_id.parse::<u32>().map_err(|_| DiskError::DataValidation("Invalid Disk ID parameter".into()))?;
+            let native_manager = NativeDiskManager::new(false)?;
+            let is_uefi = NativeDiskManager::is_uefi_host();
+
+            let payload_size_mb = if is_uefi {
+                boot_size_mb.saturating_sub(50)
+            } else {
+                boot_size_mb
+            };
 
             info!("Allocating native LINUX_LIVE & LINUX_EFI bounds at offset {}...", target_offset_bytes);
             let disk_num = disk_id.parse::<u32>().map_err(|_| DiskError::DataValidation("Invalid Disk ID parameter".into()))?;
             
-            // To invoke the native manager specific method we downcast or just cast back since we know the OS
-            // But since DiskManager is dynamic we need to make create_live_boot_partitions part of the trait
-            // Let's implement it inside the native manager and expose it if possible, or add it to trait.
-            // Since trait changes are annoying, I'll bypass by instantiating a new NativeDiskManager just for this
-            // Because NativeDiskManager requires debug_mode we'll pass false for now or fetch it.
-            let native_manager = NativeDiskManager::new(false)?;
-            
-            let (ntfs_letter, fat32_letter) = match native_manager.create_live_boot_partitions(
+            let (ntfs_letter, fat32_letter_opt) = match native_manager.create_live_boot_partitions(
                 disk_num,
                 target_offset_bytes,
-                payload_size_mb
+                payload_size_mb,
+                is_uefi
             ).await {
                 Ok(letters) => letters,
                 Err(e) => return Err(e),
@@ -282,8 +294,12 @@ impl CliREPL {
                 info!("Cloning OS Payload: {} -> {}", iso_drive_letter, ntfs_letter);
                 PayloadManager::copy_payload(&iso_drive_letter, &ntfs_letter, is_hdd).await?;
 
-                info!("Injecting UEFI hooks -> {}", fat32_letter);
-                BootManager::install_uefi_driver(&fat32_letter).await?;
+                if let Some(fat32_letter) = fat32_letter_opt {
+                    info!("Injecting UEFI hooks -> {}", fat32_letter);
+                    BootManager::install_uefi_driver(&fat32_letter).await?;
+                } else {
+                    info!("Legacy BIOS host detected. Bypassing UEFI driver injection.");
+                }
 
                 info!("Patching GRUB routing block...");
                 BootManager::patch_boot_configs(&ntfs_letter, "LINUX_LIVE").await?;
@@ -293,7 +309,6 @@ impl CliREPL {
 
             if let Err(e) = post_creation_result {
                 error!("Saga failure detected. Executing explicit diskpart rollback...");
-                let is_uefi = NativeDiskManager::is_uefi_host();
                 let _ = native_manager.rollback_live_partitions(disk_num, is_uefi).await;
                 return Err(e);
             }
@@ -301,8 +316,10 @@ impl CliREPL {
             Ok(())
         }.await;
 
-        info!("Detaching Virtual ISO Image...");
-        let _ = IsoManager::dismount_iso(&iso_path).await;
+        if !is_pre_mounted {
+            info!("Detaching Virtual ISO Image...");
+            let _ = IsoManager::dismount_iso(&iso_path).await;
+        }
 
         workflow_result
     }

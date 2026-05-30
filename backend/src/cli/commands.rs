@@ -39,12 +39,9 @@ pub enum Commands {
         /// Absolute path to the payload ISO
         #[arg(long)]
         iso_path: String,
-        /// Target space required for the Linux payload in GB
+        /// Boot partition size overhead in MB
         #[arg(long)]
-        linux_size_gb: u32,
-        /// Boot partition size overhead in GB
-        #[arg(long)]
-        boot_size_gb: u32,
+        boot_size_mb: u32,
     },
 
     /// Exit the CLI

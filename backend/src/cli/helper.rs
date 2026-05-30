@@ -94,7 +94,7 @@ impl Completer for IsekaiHelper {
                             for part in parts {
                                 if part.id.starts_with(word) {
                                     candidates.push(Pair {
-                                        display: format!("{} ({}GB {})", part.id, part.size_gb, part.file_system),
+                                        display: format!("{} ({}MB {})", part.id, part.size_bytes / 1024 / 1024, part.file_system),
                                         replacement: part.id.clone(),
                                     });
                                 }
@@ -107,7 +107,7 @@ impl Completer for IsekaiHelper {
 
             // 2. Completing flags themselves
             if word.starts_with("--") || is_space {
-                let flags = vec!["--disk-id", "--iso-path", "--linux-size-gb", "--partition-id", "--boot-size-gb"];
+                let flags = vec!["--disk-id", "--iso-path", "--partition-id", "--boot-size-mb"];
 
                 for flag in flags {
                     if flag.starts_with(word) {
