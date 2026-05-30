@@ -25,4 +25,10 @@ pub enum DiskError {
 
     #[error("WMI error: {0}")]
     WmiError(String),
+
+    #[error("Shrinking failed: {reason}, Hint: {hint}")]
+    ShrinkFailed {
+        reason: String,
+        hint: String
+    }
 }
