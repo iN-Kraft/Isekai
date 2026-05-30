@@ -24,6 +24,7 @@ pub mod linux_validator;
 pub mod iso_manager;
 pub mod assets;
 pub mod boot_manager;
+pub mod PayloadManager;
 
 #[cfg(target_os = "linux")]
 pub use linux_validator::LinuxValidator as NativeValidator;

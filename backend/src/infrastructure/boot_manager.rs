@@ -1,4 +1,5 @@
 use std::path::Path;
+use regex::{Captures, Regex};
 use tokio::fs;
 use crate::domain::errors::DiskError;
 use crate::infrastructure::assets::{BOOT_X64_EFI, EXFAT_X64_EFI, NTFS_X64_EFI};
@@ -24,5 +25,99 @@ impl BootManager {
 
         println!("Embedded UEFI drivers successfully written to {}", fat32_drive_letter);
         Ok(())
+    }
+
+    pub async fn patch_boot_configs(
+        target_drive_letter: &str,
+        new_label: &str
+    ) -> Result<u32, DiskError> {
+        let base_path = format!("{}:\\", target_drive_letter.trim_end_matches(':'));
+        let search_paths = vec![
+            "EFI\\BOOT\\grub.cfg",
+            "EFI\\BOOT\\BOOT.conf",
+            "boot\\grub2\\grub.cfg",
+            "boot\\grub\\grub.cfg",
+            "isolinux\\isolinux.cfg",
+            "isolinux\\grub.conf",
+            "syslinux\\syslinux.cfg",
+            "syslinux\\archiso_sys-linux.cfg",
+            "syslinux\\archiso_pxe-linux.cfg",
+            "syslinux\\archiso_sys.cfg",
+            "syslinux\\archiso_pxe.cfg",
+        ];
+
+        let mut config_files = Vec::new();
+
+        for path in search_paths {
+            let full_path = Path::new(&base_path).join(path);
+            if full_path.exists() {
+                config_files.push(full_path);
+            }
+        }
+
+        let loader_entries_dir = Path::new(&base_path).join("loader\\entries");
+        if loader_entries_dir.exists() {
+            let mut entries = fs::read_dir(loader_entries_dir).await.map_err(DiskError::OsError)?;
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("conf") {
+                    config_files.push(path);
+                }
+            }
+        }
+
+        if config_files.is_empty() {
+            println!("Warning: No boot config files found to patch. This ISO might use an unknown bootloader.");
+            return Ok(0);
+        }
+
+        let patterns = vec![
+            Regex::new(r"(?m)(root=live:(?:CD)?LABEL=)[^\s\\]+").unwrap(),
+            Regex::new(r"(?m)(set\s+isolabel=)[^\s]+").unwrap(),
+            Regex::new(r"(?m)(CDLABEL=)[^\s\\]+").unwrap(),
+
+            Regex::new(r"(?m)(archiso(?:search)?label=)[^\s\\]+").unwrap(),
+            Regex::new(r"(?m)(archisodevice=/dev/disk/by-label/)[^\s\\]+").unwrap(),
+
+            Regex::new(r"(?m)(search\s+[^\r\n]*?--(?:label|fs-label|-l)\s+[']?)[^'\s]+([']?)").unwrap(),
+            Regex::new(r"(?m)(search\s+[^\r\n]*?--(?:label|fs-label|-l)\s+[`]?)[^`\s]+([`]?)").unwrap(),
+            Regex::new(r"(?m)(search\s+[^\r\n]*?--(?:label|fs-label|-l)\s+[\x22]?)[^\x22\s]+([\x22]?)").unwrap(),
+        ];
+
+        let mut patched_count = 0;
+
+        for file_path in config_files {
+            let original_content = match fs::read_to_string(&file_path).await {
+                Ok(c) => c,
+                Err(_) => {
+                    println!("Warning: Could not read {:?} (might be a binary or locked)", file_path.file_name().unwrap());
+                    continue;
+                }
+            };
+
+            let mut new_content = original_content.clone();
+
+            for regex in &patterns {
+                new_content = regex.replace_all(&new_content, |caps: &Captures| {
+                    let prefix = caps.get(1).map_or("", |m| m.as_str());
+                    let suffix = caps.get(2).map_or("", |m| m.as_str());
+
+                    format!("{}{}{}", prefix, new_label, suffix)
+                }).to_string();
+            }
+
+            if new_content != original_content {
+                if let Err(e) = fs::write(&file_path, new_content).await {
+                    println!("Warning: Failed to save patched config {:?} - {}", file_path.file_name().unwrap(), e);
+                } else {
+                    println!("Patched boot config: {:?}", file_path.file_name().unwrap());
+                    patched_count += 1;
+                }
+            }
+        }
+
+        println!("Successfully patched {} boot config file(s) with label '{}'", patched_count, new_label);
+
+        Ok(patched_count)
     }
 }
