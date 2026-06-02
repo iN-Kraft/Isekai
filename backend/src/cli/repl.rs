@@ -243,9 +243,7 @@ impl CliREPL {
         
         let workflow_result = async {
             let mb_to_bytes = 1024_u64 * 1024;
-            let alignment_buffer_mb = 20;
-            let total_shrink_mb = boot_size_mb + alignment_buffer_mb;
-            let required_free_space_bytes = (total_shrink_mb as u64) * mb_to_bytes;
+            let required_free_space_bytes = (boot_size_mb as u64) * mb_to_bytes;
             
             info!("Fetching live volume parameters for {}...", disk_id);
             let partitions = self.disk_manager.get_partitions(&disk_id).await?;
@@ -270,7 +268,7 @@ impl CliREPL {
                 .ok_or_else(|| DiskError::PartitionNotFound(partition_id.clone(), disk_id.clone()))?;
                 
             let target_offset_bytes = refreshed_target_part.offset_bytes + refreshed_target_part.size_bytes;
-            let native_manager = NativeDiskManager::new(false)?;
+            let native_manager = NativeDiskManager::new(false);
             let is_uefi = NativeDiskManager::is_uefi_host();
 
             let payload_size_mb = if is_uefi {

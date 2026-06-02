@@ -1,5 +1,4 @@
 use std::io::{Error, ErrorKind};
-use std::sync::Arc;
 use std::time::Duration;
 use async_trait::async_trait;
 use windows_sys::Win32::System::SystemInformation::{FirmwareTypeUefi, GetFirmwareType};
@@ -22,18 +21,17 @@ pub mod payload_manager;
 
 pub struct WindowsDiskManager {
     debug_mode: bool,
-    wmi_con: Arc<SharedWmi>,
 }
 
 impl WindowsDiskManager {
-    pub fn new(debug_mode: bool) -> Result<Self, DiskError> {
-        let wmi_con = WMIConnection::with_namespace_path("ROOT\\Microsoft\\Windows\\Storage")
-            .map_err(|e| DiskError::WmiError(format!("Failed to initialize WMI: {}", e)))?;
+    pub fn new(debug_mode: bool) -> Self {
 
-        Ok(Self {
-            debug_mode,
-            wmi_con: Arc::new(SharedWmi(wmi_con))
-        })
+        Self { debug_mode }
+    }
+
+    fn create_wmi_connection() -> Result<WMIConnection, DiskError> {
+        WMIConnection::with_namespace_path("ROOT\\Microsoft\\Windows\\Storage")
+            .map_err(|e| DiskError::WmiError(format!("Failed to initialize WMI: {}", e)))
     }
 
     pub async fn rollback_live_partitions(&self, disk_id: u32, _is_uefi: bool) -> Result<(), DiskError> {
@@ -187,10 +185,10 @@ impl WindowsDiskManager {
     }
 
     pub async fn is_mechanical_drive(&self, disk_id: u32) -> Result<bool, DiskError> {
-        let wmi_con = Arc::clone(&self.wmi_con);
         let is_hdd = tokio::task::spawn_blocking(move || -> Result<bool, DiskError> {
+            let wmi_con = WindowsDiskManager::create_wmi_connection()?;
             let query = format!("SELECT MediaType FROM MSFT_PhysicalDisk WHERE DeviceId = '{}'", disk_id);
-            let result: Vec<MsftPhysicalDisk> = wmi_con.0.raw_query(&query).map_err(|e| DiskError::WmiError(format!("PhysicalDisk Query failed: {}", e)))?;
+            let result: Vec<MsftPhysicalDisk> = wmi_con.raw_query(&query).map_err(|e| DiskError::WmiError(format!("PhysicalDisk Query failed: {}", e)))?;
 
             Ok(result.first().and_then(|d| d.MediaType) == Some(3))
         }).await.map_err(|e| DiskError::DataValidation(format!("Thread Pool crashed: {}", e)))??;
@@ -202,9 +200,9 @@ impl WindowsDiskManager {
 #[async_trait]
 impl DiskManager for WindowsDiskManager {
     async fn get_disks(&self) -> Result<Vec<Disk>, DiskError> {
-        let wmi_con = Arc::clone(&self.wmi_con);
         let wmi_disks = tokio::task::spawn_blocking(move || -> Result<Vec<MsftDisk>, DiskError> {
-            let results: Vec<MsftDisk> = wmi_con.0
+            let wmi_con = WindowsDiskManager::create_wmi_connection()?;
+            let results: Vec<MsftDisk> = wmi_con
                 .raw_query("SELECT * FROM MSFT_Disk")
                 .map_err(|e| DiskError::WmiError(format!("WMI Query failed for Disk: {}", e)))?;
 
@@ -245,16 +243,15 @@ impl DiskManager for WindowsDiskManager {
         let disk_index: u32 = disk_id.parse().map_err(|_| {
             DiskError::DiskNotFound(disk_id.to_string())
         })?;
-        let wmi_con = Arc::clone(&self.wmi_con);
-
         let (wmi_parts, volumes) = tokio::task::spawn_blocking(move || -> Result<(Vec<MsftPartition>, Vec<MsftVolume>), DiskError> {
+            let wmi_con = WindowsDiskManager::create_wmi_connection()?;
             let query = format!("SELECT * FROM MSFT_Partition WHERE DiskNumber = {}", disk_index);
 
-            let results: Vec<MsftPartition> = wmi_con.0
+            let results: Vec<MsftPartition> = wmi_con
                 .raw_query(&query)
                 .map_err(|e| DiskError::WmiError(format!("WMI Query failed for Partition: {}", e)))?;
 
-            let volumes: Vec<MsftVolume> = wmi_con.0
+            let volumes: Vec<MsftVolume> = wmi_con
                 .raw_query("SELECT * FROM MSFT_Volume")
                 .map_err(|e| DiskError::WmiError(format!("WMI Volume Query failed: {}", e)))?;
 
