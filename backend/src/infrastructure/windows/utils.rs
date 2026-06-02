@@ -1,4 +1,8 @@
+use crate::domain::errors::DiskError;
 use crate::domain::models::{InstallPlan, Partition};
+use ::wmi::WMIConnection;
+use tokio::task::spawn_blocking;
+use crate::infrastructure::windows::wmi::Win32EncryptableVolume;
 
 const MSR_RESERVE_BYTES: u64 = 16 * 1024 * 1024;
 const PARTITION_ALIGNMENT_BYTES: u64 = 1024 * 1024;
@@ -8,6 +12,29 @@ struct Gap {
     start: u64,
     end: u64,
     size: u64
+}
+
+pub async fn check_bitlocker_status(drive_letter: Option<&str>) -> Result<(), DiskError> {
+    let letter = match drive_letter {
+        Some(l) => l.trim_end_matches('\\'),
+        None => return Ok(())
+    };
+
+    let target_drive = letter.to_string();
+    let is_encrypted = spawn_blocking(move || -> Result<bool, DiskError> {
+        let wmi_con = WMIConnection::with_namespace_path("ROOT\\CIMV2\\Security\\MicrosoftVolumeEncryption")
+            .map_err(|e| DiskError::WmiError(format!("Failed to connect to BitLocker WMI: {}", e)))?;
+        let query = format!("SELECT ProtectionStatus FROM Win32_EncryptableVolume WHERE DriveLetter = '{}'", target_drive);
+        let results: Vec<Win32EncryptableVolume> = wmi_con.raw_query(&query).map_err(|e| DiskError::WmiError(format!("BitLocker WMI query failed: {}", e)))?;
+
+        Ok(results.first().map(|v| v.ProtectionStatus > 0).unwrap_or(false))
+    }).await.map_err(|e| DiskError::DataValidation(format!("Thread Pool crashed: {}", e)))??;
+
+    if is_encrypted {
+        return Err(DiskError::DriveEncrypted(letter.to_string()));
+    }
+
+    Ok(())
 }
 
 pub fn determine_partition_label(drive_letter: Option<&str>, gpt_type: Option<&str>, mbr_type: Option<u16>) -> String {
@@ -129,5 +156,5 @@ pub fn get_contiguous_install_plan(
     result.boot_partition_offset_bytes = boot_partition_offset;
     result.linux_space_bytes = linux_space;
 
-    return result;
+    result
 }

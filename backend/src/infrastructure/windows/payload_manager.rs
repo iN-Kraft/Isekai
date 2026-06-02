@@ -15,6 +15,7 @@ impl PayloadManager {
         println!("This may take a few minutes...");
 
         let output = Command::new("robocopy")
+            .kill_on_drop(true)
             .args([
                 &source,
                 &target,

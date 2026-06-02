@@ -4,14 +4,13 @@ use std::time::Duration;
 use async_trait::async_trait;
 use windows_sys::Win32::System::SystemInformation::{FirmwareTypeUefi, GetFirmwareType};
 use ::wmi::WMIConnection;
-use tokio::task::spawn_blocking;
 use tracing::warn;
 use crate::domain::errors::DiskError;
 use crate::domain::models::{Disk, Partition};
-use crate::infrastructure::windows::wmi::{MsftDisk, MsftPartition, MsftPhysicalDisk, MsftVolume, SharedWmi, Win32EncryptableVolume};
+use crate::infrastructure::windows::wmi::{MsftDisk, MsftPartition, MsftPhysicalDisk, MsftVolume, SharedWmi};
 use crate::domain::traits::DiskManager;
 use crate::infrastructure::windows::diskpart::run_diskpart_script;
-use crate::infrastructure::windows::utils::determine_partition_label;
+use crate::infrastructure::windows::utils::{check_bitlocker_status, determine_partition_label};
 
 pub mod wmi;
 pub mod diskpart;
@@ -179,28 +178,6 @@ impl WindowsDiskManager {
         Ok((ntfs_letter, fat32_letter))
     }
 
-    pub async fn check_bitlocker_status(&self, drive_letter: Option<&str>) -> Result<(), DiskError> {
-        let letter = match drive_letter {
-            Some(l) => l.trim_end_matches('\\'),
-            None => return Ok(())
-        };
-
-        let target_drive = letter.to_string();
-        let wmi_con = Arc::clone(&self.wmi_con);
-        let is_encrypted = spawn_blocking(move || -> Result<bool, DiskError> {
-            let query = format!("SELECT ProtectionStatus FROM Win32_EncryptableVolume WHERE DriveLetter = '{}'", target_drive);
-            let results: Vec<Win32EncryptableVolume> = wmi_con.0.raw_query(&query).map_err(|e| DiskError::WmiError(format!("BitLocker WMI query failed: {}", e)))?;
-
-            Ok(results.first().map(|v| v.ProtectionStatus > 0).unwrap_or(false))
-        }).await.map_err(|e| DiskError::DataValidation(format!("Thread Pool crashed: {}", e)))??;
-
-        if is_encrypted {
-            return Err(DiskError::DriveEncrypted(letter.to_string()));
-        }
-
-        Ok(())
-    }
-
     pub fn is_uefi_host() -> bool {
         let mut fw_type = 0;
         unsafe {
@@ -342,7 +319,7 @@ impl DiskManager for WindowsDiskManager {
         let partitions = self.get_partitions_fresh(disk_id, Some(partition_id)).await?;
         let target_part = partitions.iter().find(|p| p.id == partition_id).ok_or_else(|| DiskError::DiskNotFound(format!("Partition {} disappeared", partition_id)))?;
 
-        self.check_bitlocker_status(target_part.drive_letter.as_deref()).await?;
+        check_bitlocker_status(target_part.drive_letter.as_deref()).await?;
 
         println!("Attempting primary shrink method: Resize-Partition");
         let cmd_str = format!("Resize-Partition -DiskNumber {} -PartitionNumber {} -Size {}", disk_id, partition_id, target_size_bytes);
@@ -376,6 +353,17 @@ impl DiskManager for WindowsDiskManager {
 
         run_diskpart_script(&dp_script, format!("shrink_{}_{}", disk_id, partition_id)).await?;
         tokio::time::sleep(Duration::from_secs(10)).await;
+
+        let fresh_parts = self.get_partitions_fresh(disk_id, Some(partition_id)).await?;
+        let shrunken_part = fresh_parts.iter().find(|p| p.id == partition_id).ok_or_else(|| DiskError::DiskNotFound(format!("Partition {} disappeared after diskpart", partition_id)))?;
+        let tolerance_bytes = 5 * 1024 * 1024;
+
+        if shrunken_part.size_bytes.abs_diff(target_size_bytes) > tolerance_bytes {
+            return Err(DiskError::OsError(Error::new(
+                ErrorKind::Other,
+                format!("Diskpart silent failure: Partition size is {} bytes, but expected roughly {} bytes. Shrink aborted.", shrunken_part.size_bytes, target_size_bytes)
+            )));
+        }
 
         Ok(())
     }

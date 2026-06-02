@@ -30,6 +30,12 @@ impl IsoManager {
         let drive_letter = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
         if drive_letter.is_empty() {
+            let dismount_script = format!("Dismount-DiskImage -ImagePath '{}' -ErrorAction SilentlyContinue", iso_path);
+            let _ = Command::new("powershell.exe")
+                .args(["-NoProfile", "-NonInteractive", "-Command", &dismount_script])
+                .output()
+                .await;
+
             return Err(DiskError::OsError(Error::new(
                 ErrorKind::NotFound,
                 "ISO mounted but no drive letter was assigned by Windows"
