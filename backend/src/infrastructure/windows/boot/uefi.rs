@@ -1,12 +1,24 @@
 use std::borrow::Cow;
 use std::io::{Error, ErrorKind};
 use std::path::Path;
+use std::sync::LazyLock;
 use async_trait::async_trait;
 use regex::{Captures, Regex};
 use tokio::fs;
 use crate::domain::errors::DiskError;
 use crate::infrastructure::assets::{BOOT_X64_EFI, EXFAT_X64_EFI, NTFS_X64_EFI};
 use crate::infrastructure::windows::boot::BootStrategy;
+
+static BOOT_CONFIG_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| vec![
+    Regex::new(r"(?m)(root=live:(?:CD)?LABEL=)[^\s\\]+").unwrap(),
+    Regex::new(r"(?m)(set\s+isolabel=)[^\s]+").unwrap(),
+    Regex::new(r"(?m)(CDLABEL=)[^\s\\]+").unwrap(),
+    Regex::new(r"(?m)(archiso(?:search)?label=)[^\s\\]+").unwrap(),
+    Regex::new(r"(?m)(archisodevice=/dev/disk/by-label/)[^\s\\]+").unwrap(),
+    Regex::new(r"(?m)(search\s+[^\r\n]*?--(?:label|fs-label|-l)\s+[']?)[^'\s]+([']?)").unwrap(),
+    Regex::new(r"(?m)(search\s+[^\r\n]*?--(?:label|fs-label|-l)\s+[`]?)[^`\s]+([`]?)").unwrap(),
+    Regex::new(r"(?m)(search\s+[^\r\n]*?--(?:label|fs-label|-l)\s+[\x22]?)[^\x22\s]+([\x22]?)").unwrap(),
+]);
 
 pub struct UefiBootManager;
 
@@ -55,7 +67,7 @@ impl BootStrategy for UefiBootManager {
         println!("Created new EFI boot entry: {}", guid);
 
         let inherited_props = [
-            "default", "displayorder", "toolsdisplayorder", "timneout", "resumeobject", "inhreit", "locale"
+            "default", "displayorder", "toolsdisplayorder", "timeout", "resumeobject", "inherit", "locale"
         ];
 
         for prop in inherited_props {
@@ -165,19 +177,6 @@ impl UefiBootManager {
             return Ok(0);
         }
 
-        let patterns = vec![
-            Regex::new(r"(?m)(root=live:(?:CD)?LABEL=)[^\s\\]+").unwrap(),
-            Regex::new(r"(?m)(set\s+isolabel=)[^\s]+").unwrap(),
-            Regex::new(r"(?m)(CDLABEL=)[^\s\\]+").unwrap(),
-
-            Regex::new(r"(?m)(archiso(?:search)?label=)[^\s\\]+").unwrap(),
-            Regex::new(r"(?m)(archisodevice=/dev/disk/by-label/)[^\s\\]+").unwrap(),
-
-            Regex::new(r"(?m)(search\s+[^\r\n]*?--(?:label|fs-label|-l)\s+[']?)[^'\s]+([']?)").unwrap(),
-            Regex::new(r"(?m)(search\s+[^\r\n]*?--(?:label|fs-label|-l)\s+[`]?)[^`\s]+([`]?)").unwrap(),
-            Regex::new(r"(?m)(search\s+[^\r\n]*?--(?:label|fs-label|-l)\s+[\x22]?)[^\x22\s]+([\x22]?)").unwrap(),
-        ];
-
         let mut patched_count = 0;
 
         for file_path in config_files {
@@ -192,7 +191,7 @@ impl UefiBootManager {
             let mut current_content = original_content;
             let mut file_was_patched = false;
 
-            for regex in &patterns {
+            for regex in BOOT_CONFIG_PATTERNS.iter() {
                 if let Cow::Owned(new_string) = regex.replace_all(&current_content, |caps: &Captures| {
                     let prefix = caps.get(1).map_or("", |m| m.as_str());
                     let suffix = caps.get(2).map_or("", |m| m.as_str());

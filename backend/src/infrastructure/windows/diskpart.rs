@@ -9,7 +9,7 @@ impl Drop for TempFileGuard {
         let path = self.0.clone();
 
         tokio::task::spawn_blocking(move || {
-            let _ = tokio::fs::remove_file(&path);
+            let _ = std::fs::remove_file(&path);
         });
     }
 }
@@ -22,17 +22,19 @@ pub async fn run_diskpart_script(script_content: &str, identifier: String) -> Re
     tokio::fs::write(&script_path, script_content).await.map_err(DiskError::OsError)?;
 
     let output = tokio::process::Command::new("diskpart")
+        .kill_on_drop(true)
         .args(["/s", script_path.to_str().unwrap()])
         .output()
         .await
         .map_err(DiskError::OsError)?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    if !output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
 
-    if !stdout.to_lowercase().contains("successfully") {
         return Err(DiskError::OsError(Error::new(
             ErrorKind::Other,
-            format!("DiskPart execution failed:\n{}", stdout)
+            format!("DiskPart execution failed: {}\nError: {}", stdout, stderr)
         )));
     }
 

@@ -1,4 +1,3 @@
-use crate::domain::errors::DiskError;
 use crate::domain::models::{InstallPlan, Partition};
 
 const MSR_RESERVE_BYTES: u64 = 16 * 1024 * 1024;
@@ -9,27 +8,6 @@ struct Gap {
     start: u64,
     end: u64,
     size: u64
-}
-
-pub async fn check_bitlocker_status(drive_letter: Option<&str>) -> Result<(), DiskError> {
-    let letter = match drive_letter {
-        Some(l) => l,
-        None => return Ok(()) // No drive letter usually means no BootLicker
-    };
-
-    let output = tokio::process::Command::new("manage-bde")
-        .args(["-status", letter])
-        .output()
-        .await
-        .map_err(DiskError::OsError)?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    if stdout.contains("Conversion Status:    Encrypted") || stdout.contains("Fully Encrypted") {
-        return Err(DiskError::DriveEncrypted(letter.to_string()));
-    }
-
-    Ok(())
 }
 
 pub fn determine_partition_label(drive_letter: Option<&str>, gpt_type: Option<&str>, mbr_type: Option<u16>) -> String {

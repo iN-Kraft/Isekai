@@ -41,6 +41,12 @@ pub struct MsftVolume {
     pub FileSystemLabel: Option<String>
 }
 
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "PascalCase")]
+pub struct Win32EncryptableVolume {
+    pub ProtectionStatus: u32,
+}
+
 pub struct SharedWmi(pub WMIConnection);
 unsafe impl Send for SharedWmi {}
 unsafe impl Sync for SharedWmi {}

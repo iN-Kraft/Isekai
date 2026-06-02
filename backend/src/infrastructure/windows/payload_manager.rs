@@ -58,7 +58,7 @@ impl PayloadManager {
     async fn strip_readonly_attributes(target_path: &str) -> Result<(), DiskError> {
         println!("Stripping read-only attributes from copied files...");
 
-        let target_glob = format!("{}*.*", target_path);
+        let target_glob = format!("{}*", target_path);
         let status = Command::new("attrib")
             .args(["-R", &target_glob, "/S", "/D"])
             .stdout(Stdio::null())

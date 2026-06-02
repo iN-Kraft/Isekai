@@ -11,7 +11,7 @@ pub struct LegacyBootManager;
 
 #[async_trait]
 impl BootStrategy for LegacyBootManager {
-    async fn inject_boot_binaries(&self, os_drive: &str, efi_drive: Option<&str>) -> Result<(), DiskError> {
+    async fn inject_boot_binaries(&self, os_drive: &str, _efi_drive: Option<&str>) -> Result<(), DiskError> {
         let base_path = format!("{}:\\", os_drive.trim_end_matches(':'));
         let mbr_path = Path::new(&base_path).join("grldr.mbr");
         let grldr_path = Path::new(&base_path).join("grldr");

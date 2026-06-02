@@ -1,4 +1,4 @@
-use windows_registry::CURRENT_USER;
+use windows_registry::LOCAL_MACHINE;
 
 pub struct AutoPlayGuard {
     original_value: Option<u32>
@@ -9,7 +9,7 @@ impl AutoPlayGuard {
         let path = "Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer";
         let mut original_value = None;
 
-        if let Ok(key) = CURRENT_USER.create(path) {
+        if let Ok(key) = LOCAL_MACHINE.create(path) {
             if let Ok(val) = key.get_u32("NoDriveTypeAutoRun") {
                 original_value = Some(val);
             }
@@ -25,7 +25,7 @@ impl Drop for AutoPlayGuard {
     fn drop(&mut self) {
         let path = "Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer";
 
-        if let Ok(key) = CURRENT_USER.create(path) {
+        if let Ok(key) = LOCAL_MACHINE.create(path) {
             if let Some(val) = self.original_value {
                 let _ = key.set_u32("NoDriveTypeAutoRun", val);
             } else {
