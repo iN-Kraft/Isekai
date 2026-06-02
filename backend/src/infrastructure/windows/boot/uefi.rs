@@ -6,7 +6,7 @@ use regex::{Captures, Regex};
 use tokio::fs;
 use crate::domain::errors::DiskError;
 use crate::infrastructure::assets::{BOOT_X64_EFI, EXFAT_X64_EFI, NTFS_X64_EFI};
-use crate::infrastructure::boot::BootStrategy;
+use crate::infrastructure::windows::boot::BootStrategy;
 
 pub struct UefiBootManager;
 

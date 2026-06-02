@@ -1,8 +1,8 @@
 #[cfg(target_os = "windows")]
-pub mod windows_disk;
+pub mod windows;
 
 #[cfg(target_os = "windows")]
-pub use windows_disk::WindowsDiskManager as NativeDiskManager;
+pub use windows::WindowsDiskManager as NativeDiskManager;
 
 #[cfg(target_os = "linux")]
 pub mod linux_disk;
@@ -21,11 +21,7 @@ pub use windows_validator::WindowsValidator as NativeValidator;
 
 #[cfg(target_os = "linux")]
 pub mod linux_validator;
-pub mod iso_manager;
 pub mod assets;
-pub mod payload_manager;
-pub mod boot;
-pub mod autoplay;
 
 #[cfg(target_os = "linux")]
 pub use linux_validator::LinuxValidator as NativeValidator;

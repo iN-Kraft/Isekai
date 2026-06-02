@@ -1,6 +1,5 @@
 use std::sync::Arc;
 use clap::Parser;
-use tracing::{info, error};
 use rustyline::{CompletionType, Config, Editor};
 use rustyline::error::ReadlineError;
 use shlex::split;
@@ -9,15 +8,11 @@ use tokio::task::block_in_place;
 use crate::domain::traits::DiskManager;
 use crate::domain::validation::ComponentStatus;
 use crate::domain::errors::DiskError;
-
+use tracing::{info, error};
 #[cfg(target_os = "windows")]
 use crate::infrastructure::{
-    NativeValidator,
-    iso_manager::IsoManager, 
-    payload_manager::PayloadManager, 
-    boot::BootManager,
     NativeDiskManager,
-    autoplay::AutoPlayGuard
+    NativeValidator
 };
 
 #[cfg(target_os = "linux")]
@@ -25,6 +20,14 @@ use crate::infrastructure::NativeValidator;
 
 use crate::cli::commands::{Commands, IsekaiCli};
 use crate::cli::helper::IsekaiHelper;
+#[cfg(target_os = "windows")]
+use crate::infrastructure::windows::autoplay::AutoPlayGuard;
+#[cfg(target_os = "windows")]
+use crate::infrastructure::windows::boot::BootManager;
+#[cfg(target_os = "windows")]
+use crate::infrastructure::windows::iso_manager::IsoManager;
+#[cfg(target_os = "windows")]
+use crate::infrastructure::windows::payload_manager::PayloadManager;
 
 pub struct CliREPL {
     pub disk_manager: Arc<dyn DiskManager>,
@@ -267,7 +270,6 @@ impl CliREPL {
                 .ok_or_else(|| DiskError::PartitionNotFound(partition_id.clone(), disk_id.clone()))?;
                 
             let target_offset_bytes = refreshed_target_part.offset_bytes + refreshed_target_part.size_bytes;
-            let disk_num = disk_id.parse::<u32>().map_err(|_| DiskError::DataValidation("Invalid Disk ID parameter".into()))?;
             let native_manager = NativeDiskManager::new(false)?;
             let is_uefi = NativeDiskManager::is_uefi_host();
 

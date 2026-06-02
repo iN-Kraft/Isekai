@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use tokio::process::Command;
 use crate::domain::errors::DiskError;
 use crate::infrastructure::assets::{GRLDR, GRLDR_MBR};
-use crate::infrastructure::boot::BootStrategy;
-use crate::infrastructure::boot::sniffer::{detect_payload, IsoFlavor};
+use crate::infrastructure::windows::boot::BootStrategy;
+use crate::infrastructure::windows::boot::sniffer::{detect_payload, IsoFlavor};
 
 pub struct LegacyBootManager;
 

@@ -1,84 +1,23 @@
-#![allow(non_snake_case)]
-
-use std::env::temp_dir;
-use std::fs;
 use std::io::{Error, ErrorKind};
-use std::path::PathBuf;
-use std::process::Command;
-use async_trait::async_trait;
-use serde::Deserialize;
-use wmi::WMIConnection;
-use crate::domain::errors::DiskError;
-use crate::domain::models::{Disk, InstallPlan, Partition};
-use crate::domain::traits::DiskManager;
-use std::string::String;
 use std::sync::Arc;
 use std::time::Duration;
+use async_trait::async_trait;
 use windows_sys::Win32::System::SystemInformation::{FirmwareTypeUefi, GetFirmwareType};
+use ::wmi::WMIConnection;
+use crate::domain::errors::DiskError;
+use crate::domain::models::{Disk, Partition};
+use crate::infrastructure::windows::wmi::{MsftDisk, MsftPartition, MsftPhysicalDisk, MsftVolume, SharedWmi};
+use crate::domain::traits::DiskManager;
+use crate::infrastructure::windows::diskpart::run_diskpart_script;
+use crate::infrastructure::windows::utils::{check_bitlocker_status, determine_partition_label};
 
-const MSR_RESERVE_BYTES: u64 = 16 * 1024 * 1024;
-const PARTITION_ALIGNMENT_BYTES: u64 = 1024 * 1024;
-const TOTAL_PLACEMENT_OVERHEAD_BYTES: u64 = MSR_RESERVE_BYTES + PARTITION_ALIGNMENT_BYTES;
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "PascalCase")]
-struct MsftPhysicalDisk {
-    MediaType: Option<u16>
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "PascalCase")]
-struct MsftDisk {
-    Number: u32,
-    FriendlyName: Option<String>,
-    Size: Option<u64>,
-    IsSystem: Option<bool>,
-    IsBoot: Option<bool>,
-    BusType: Option<u16>,
-    PartitionStyle: Option<u16>
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "PascalCase")]
-struct MsftPartition {
-    DiskNumber: u32,
-    PartitionNumber: u32,
-    Offset: Option<u64>,
-    Size: Option<u64>,
-    DriveLetter: Option<String>,
-    GptType: Option<String>,
-    MbrType: Option<u16>
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "PascalCase")]
-struct MsftVolume {
-    DriveLetter: Option<String>,
-    FileSystem: Option<String>,
-    SizeRemaining: Option<u64>,
-    FileSystemLabel: Option<String>
-}
-
-struct Gap {
-    start: u64,
-    end: u64,
-    size: u64
-}
-
-struct TempFileGuard(PathBuf);
-impl Drop for TempFileGuard {
-    fn drop(&mut self) {
-        let path = self.0.clone();
-
-        tokio::task::spawn_blocking(move || {
-            let _ = fs::remove_file(&path);
-        });
-    }
-}
-
-struct SharedWmi(WMIConnection);
-unsafe impl Send for SharedWmi {}
-unsafe impl Sync for SharedWmi {}
+pub mod wmi;
+pub mod diskpart;
+pub mod utils;
+pub mod autoplay;
+pub mod boot;
+pub mod iso_manager;
+pub mod payload_manager;
 
 pub struct WindowsDiskManager {
     debug_mode: bool,
@@ -108,7 +47,7 @@ impl WindowsDiskManager {
             exit\n",
             disk_id
         );
-        self.run_diskpart_script(&dp_script, format!("rollback_{}", disk_id)).await
+        run_diskpart_script(&dp_script, format!("rollback_{}", disk_id)).await
     }
 
     async fn get_partitions_fresh(
@@ -152,7 +91,7 @@ impl WindowsDiskManager {
             disk_id, partition_style
         );
 
-        self.run_diskpart_script(&dp_script, format!("wipe_{}", disk_id)).await?;
+        run_diskpart_script(&dp_script, format!("wipe_{}", disk_id)).await?;
 
         tokio::time::sleep(Duration::from_secs(3)).await;
 
@@ -192,7 +131,7 @@ impl WindowsDiskManager {
         };
 
         println!("Creating Live Boot Partitions (NTFS Payload{})...", if is_uefi { " + FAT32 Driver Hook" } else { "" });
-        self.run_diskpart_script(&dp_script, format!("create_live_{}", disk_id)).await?;
+        run_diskpart_script(&dp_script, format!("create_live_{}", disk_id)).await?;
 
         let mut ntfs_letter = None;
         let mut fat32_letter = None;
@@ -232,30 +171,7 @@ impl WindowsDiskManager {
         Ok((ntfs_letter, fat32_letter))
     }
 
-    async fn run_diskpart_script(&self, script_content: &str, identifier: String) -> Result<(), DiskError> {
-        let temp_dir = temp_dir();
-        let script_path = temp_dir.join(format!("dp_{}.txt", identifier));
-        let _guard = TempFileGuard(script_path.clone());
 
-        tokio::fs::write(&script_path, script_content).await.map_err(DiskError::OsError)?;
-
-        let output = tokio::process::Command::new("diskpart")
-            .args(["/s", script_path.to_str().unwrap()])
-            .output()
-            .await
-            .map_err(DiskError::OsError)?;
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-
-        if !stdout.to_lowercase().contains("successfully") {
-            return Err(DiskError::OsError(Error::new(
-                ErrorKind::Other,
-                format!("DiskPart execution failed:\n{}", stdout)
-            )));
-        }
-
-        Ok(())
-    }
 
     pub fn is_uefi_host() -> bool {
         let mut fw_type = 0;
@@ -278,149 +194,6 @@ impl WindowsDiskManager {
     }
 }
 
-fn determine_partition_label(drive_letter: Option<&str>, gpt_type: Option<&str>, mbr_type: Option<u16>) -> String {
-    if let Some(dl) = drive_letter {
-        let trimmed = dl.trim_matches('\0').trim();
-        if trimmed == "C" {
-            return "C: (Windows/NTFS)".to_string();
-        } else if !trimmed.is_empty() {
-            return format!("{}: drive", trimmed)
-        }
-    }
-
-    if let Some(gpt) = gpt_type {
-        let gpt_lower = gpt.to_lowercase();
-        if gpt_lower.contains("de94bba4") {
-            return "Recovery".to_string();
-        } else if gpt_lower.contains("e3c9e316") {
-            return "Microsoft Reversed".to_string();
-        } else if gpt_lower.contains("c12a7328") {
-            return "EFI System (ESP)".to_string();
-        }
-    }
-
-    if let Some(pt) = mbr_type {
-        if pt == 4 || pt == 39 {
-            return "Recovery".to_string();
-        }
-    }
-
-    return "Partition".to_string();
-}
-
-fn calculate_required_shrink_bytes(linux_size_mb: u32, boot_size_mb: u32) -> u64 {
-    let mb_to_bytes = 1024_u64 * 1024;
-    let linux_bytes = (linux_size_mb as u64) * mb_to_bytes;
-    let boot_bytes = (boot_size_mb as u64) * mb_to_bytes;
-
-    return linux_bytes + boot_bytes + TOTAL_PLACEMENT_OVERHEAD_BYTES;
-}
-
-fn get_contiguous_install_plan(
-    disk_size_bytes: u64,
-    partitions: &[Partition],
-    anchor_end_bytes: u64,
-    boot_size_mb: u32,
-    linux_size_mb: u32
-) -> InstallPlan {
-    let mut gaps = Vec::new();
-    let mut prev_end: u64 = 0;
-
-    for part in partitions {
-        if part.offset_bytes > prev_end {
-            let gap_size = part.offset_bytes - prev_end;
-            if gap_size > PARTITION_ALIGNMENT_BYTES {
-                gaps.push(Gap {
-                    start: prev_end,
-                    end: part.offset_bytes,
-                    size: gap_size
-                });
-            }
-        }
-        prev_end = part.offset_bytes + part.size_bytes;
-    }
-
-    if disk_size_bytes > prev_end {
-        let trailing_gap = disk_size_bytes - prev_end;
-        if trailing_gap > PARTITION_ALIGNMENT_BYTES {
-            gaps.push(Gap {
-                start: prev_end,
-                end: disk_size_bytes,
-                size: trailing_gap
-            });
-        }
-    }
-
-    let boot_size_bytes = (boot_size_mb as u64) * 1024 * 1024;
-    let min_gap_required = boot_size_bytes + TOTAL_PLACEMENT_OVERHEAD_BYTES;
-    let usable_gaps: Vec<&Gap> = gaps.iter().filter(|g| g.size >= min_gap_required).collect();
-    let mut result = InstallPlan {
-        has_boot_space: false,
-        has_requested_linux_space: false,
-        boot_partition_offset_bytes: 0,
-        linux_space_bytes: 0
-    };
-
-    if usable_gaps.is_empty() {
-        return result;
-    }
-
-    let chosen_gap = usable_gaps.iter().find(|&&g| {
-        let lower_bound = anchor_end_bytes.saturating_sub(PARTITION_ALIGNMENT_BYTES);
-        let upper_bound = anchor_end_bytes.saturating_add(PARTITION_ALIGNMENT_BYTES);
-        g.start >= lower_bound && g.start <= upper_bound
-    }).copied().or_else(|| {
-        usable_gaps.iter()
-            .filter(|&&g| g.start >= anchor_end_bytes)
-            .max_by_key(|&&g| g.size)
-            .copied()
-    });
-
-    let chosen_gap = match chosen_gap {
-        Some(g) => g,
-        None => return result
-    };
-
-    let boot_end = chosen_gap.end.saturating_sub(MSR_RESERVE_BYTES);
-    let raw_boot_offset = boot_end.saturating_sub(boot_size_bytes);
-    let boot_partition_offset = (raw_boot_offset / PARTITION_ALIGNMENT_BYTES) * PARTITION_ALIGNMENT_BYTES;
-
-    if boot_partition_offset < (chosen_gap.start + PARTITION_ALIGNMENT_BYTES) {
-        return result;
-    }
-
-    let linux_space = boot_partition_offset - chosen_gap.start;
-    let requested_linux_bytes = (linux_size_mb as u64) * 1024 * 1024;
-
-    result.has_boot_space = true;
-    result.has_requested_linux_space = linux_space >= requested_linux_bytes;
-    result.boot_partition_offset_bytes = boot_partition_offset;
-    result.linux_space_bytes = linux_space;
-
-    return result;
-}
-
-async fn check_bitlocker_status(drive_letter: Option<&str>) -> Result<(), DiskError> {
-    let letter = match drive_letter {
-        Some(l) => l,
-        None => return Ok(()) // No drive letter usually means no BootLicker
-    };
-
-    let output = tokio::process::Command::new("manage-bde")
-        .args(["-status", letter])
-        .output()
-        .await
-        .map_err(DiskError::OsError)?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    if stdout.contains("Conversion Status:    Encrypted") || stdout.contains("Fully Encrypted") {
-        return Err(DiskError::DriveEncrypted(letter.to_string()));
-    }
-
-    return Ok(())
-}
-
 #[async_trait]
 impl DiskManager for WindowsDiskManager {
     async fn get_disks(&self) -> Result<Vec<Disk>, DiskError> {
@@ -431,33 +204,33 @@ impl DiskManager for WindowsDiskManager {
                 .map_err(|e| DiskError::WmiError(format!("WMI Query failed for Disk: {}", e)))?;
 
             Ok(results)
-            }).await.map_err(|e| DiskError::DataValidation(format!("Thread Pool crashed: {}", e)))??;
+        }).await.map_err(|e| DiskError::DataValidation(format!("Thread Pool crashed: {}", e)))??;
 
-            let mut disks = Vec::with_capacity(wmi_disks.len());
+        let mut disks = Vec::with_capacity(wmi_disks.len());
 
-            for wmi_disk in wmi_disks {
-                let bus_type = wmi_disk.BusType.unwrap_or(0);
-                let friendly_name = wmi_disk.FriendlyName.as_deref().unwrap_or("Unknown");
-                let is_virtual = bus_type == 14 || bus_type == 15 || friendly_name.to_lowercase().contains("virtual");
+        for wmi_disk in wmi_disks {
+            let bus_type = wmi_disk.BusType.unwrap_or(0);
+            let friendly_name = wmi_disk.FriendlyName.as_deref().unwrap_or("Unknown");
+            let is_virtual = bus_type == 14 || bus_type == 15 || friendly_name.to_lowercase().contains("virtual");
 
-                if is_virtual && !self.debug_mode {
-                    continue;
-                }
-
-                let size_bytes = wmi_disk.Size.unwrap_or(0);
-                let size_gb = (size_bytes / 1024 / 1024 / 1024) as u32;
-                let is_sys = wmi_disk.IsSystem.unwrap_or(false) || wmi_disk.IsBoot.unwrap_or(false);
-                let is_gpt = wmi_disk.PartitionStyle.unwrap_or(0) == 2;
-
-                disks.push(Disk {
-                    stable_id: wmi_disk.Number.to_string(),
-                    name: friendly_name.to_string(),
-                    total_gb: size_gb,
-                    free_gb: 0,
-                    is_system_drive: is_sys,
-                    is_gpt
-                });
+            if is_virtual && !self.debug_mode {
+                continue;
             }
+
+            let size_bytes = wmi_disk.Size.unwrap_or(0);
+            let size_gb = (size_bytes / 1024 / 1024 / 1024) as u32;
+            let is_sys = wmi_disk.IsSystem.unwrap_or(false) || wmi_disk.IsBoot.unwrap_or(false);
+            let is_gpt = wmi_disk.PartitionStyle.unwrap_or(0) == 2;
+
+            disks.push(Disk {
+                stable_id: wmi_disk.Number.to_string(),
+                name: friendly_name.to_string(),
+                total_gb: size_gb,
+                free_gb: 0,
+                is_system_drive: is_sys,
+                is_gpt
+            });
+        }
 
         disks.sort_by_key(|d| d.stable_id.parse::<u32>().unwrap_or(u32::MAX));
         Ok(disks)
@@ -493,12 +266,12 @@ impl DiskManager for WindowsDiskManager {
             let mut drive_letter = None;
             let mut free_bytes = 0;
             let mut vol_label_str = None;
-            
+
             if let Some(dl) = &part.DriveLetter {
                 let trimmed = dl.trim_matches('\0').trim();
                 if !trimmed.is_empty() {
                     drive_letter = Some(format!("{}:", trimmed));
-                    
+
                     if let Some(vol) = volumes.iter().find(|v| {
                         v.DriveLetter.as_deref().map(|s| s.trim_matches('\0').trim()) == Some(trimmed)
                     }) {
@@ -545,7 +318,7 @@ impl DiskManager for WindowsDiskManager {
 
         println!("Attempting primary shrink method: Resize-Partition");
         let cmd_str = format!("Resize-Partition -DiskNumber {} -PartitionNumber {} -Size {}", disk_id, partition_id, target_size_bytes);
-        
+
         let output_fut = tokio::process::Command::new("powershell.exe")
             .args(["-NoProfile", "-NonInteractive", "-Command", &cmd_str])
             .output();
@@ -572,7 +345,7 @@ impl DiskManager for WindowsDiskManager {
             disk_id, partition_id, shrink_amount_mb
         );
 
-        self.run_diskpart_script(&dp_script, format!("shrink_{}_{}", disk_id, partition_id)).await?;
+        run_diskpart_script(&dp_script, format!("shrink_{}_{}", disk_id, partition_id)).await?;
         tokio::time::sleep(Duration::from_secs(10)).await;
 
         Ok(())

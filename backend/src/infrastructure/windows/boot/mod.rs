@@ -4,8 +4,8 @@ pub mod sniffer;
 
 use async_trait::async_trait;
 use crate::domain::errors::DiskError;
-use crate::infrastructure::boot::legacy::LegacyBootManager;
-use crate::infrastructure::boot::uefi::UefiBootManager;
+use crate::infrastructure::windows::boot::legacy::LegacyBootManager;
+use crate::infrastructure::windows::boot::uefi::UefiBootManager;
 
 #[async_trait]
 pub trait BootStrategy: Send + Sync {
