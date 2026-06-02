@@ -25,6 +25,7 @@ pub mod iso_manager;
 pub mod assets;
 pub mod payload_manager;
 pub mod boot;
+pub mod autoplay;
 
 #[cfg(target_os = "linux")]
 pub use linux_validator::LinuxValidator as NativeValidator;

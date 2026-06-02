@@ -16,7 +16,8 @@ use crate::infrastructure::{
     iso_manager::IsoManager, 
     payload_manager::PayloadManager, 
     boot::BootManager,
-    NativeDiskManager
+    NativeDiskManager,
+    autoplay::AutoPlayGuard
 };
 
 #[cfg(target_os = "linux")]
@@ -218,6 +219,7 @@ impl CliREPL {
         iso_path: String,
         boot_size_mb: u32,
     ) -> Result<(), DiskError> {
+        let _autoplay_guard = AutoPlayGuard::new();
         let is_pre_mounted = iso_path.len() <= 3 && (iso_path.ends_with(':') || iso_path.ends_with(":\\"));
         let iso_drive_letter = if is_pre_mounted {
             let letter = iso_path.trim_end_matches('\\').to_string();

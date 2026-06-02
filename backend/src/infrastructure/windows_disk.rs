@@ -76,50 +76,6 @@ impl Drop for TempFileGuard {
     }
 }
 
-struct AutoPlayGuard {
-    original_value: Option<String>
-}
-
-impl AutoPlayGuard {
-    fn new() -> Self {
-        let mut original_value = None;
-        let query = Command::new("reg")
-            .args(["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer", "/v", "NoDriveTypeAutoRun"])
-            .output();
-
-        if let Ok(output) = query {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            for line in stdout.lines() {
-                if line.contains("REG_DWORD") {
-                    if let Some(val) = line.split_whitespace().last() {
-                        original_value = Some(val.to_string());
-                    }
-                }
-            }
-        }
-
-        let _ = Command::new("reg")
-            .args(["add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer", "/v", "NoDriveTypeAutoRun", "/t", "REG_DWORD", "/d", "255", "/f"])
-            .output();
-
-        Self { original_value }
-    }
-}
-
-impl Drop for AutoPlayGuard {
-    fn drop(&mut self) {
-        if let Some(val) = &self.original_value {
-            let _ = Command::new("reg")
-                .args(["add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer", "/v", "NoDriveTypeAutoRun", "/t", "REG_DWORD", "/d", val, "/f"])
-                .output();
-        } else {
-            let _ = Command::new("reg")
-                .args(["delete", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer", "/v", "NoDriveTypeAutoRun", "/f"])
-                .output();
-        }
-    }
-}
-
 struct SharedWmi(WMIConnection);
 unsafe impl Send for SharedWmi {}
 unsafe impl Sync for SharedWmi {}
@@ -236,7 +192,6 @@ impl WindowsDiskManager {
         };
 
         println!("Creating Live Boot Partitions (NTFS Payload{})...", if is_uefi { " + FAT32 Driver Hook" } else { "" });
-        let _autoplay_guard = AutoPlayGuard::new();
         self.run_diskpart_script(&dp_script, format!("create_live_{}", disk_id)).await?;
 
         let mut ntfs_letter = None;
