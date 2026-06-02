@@ -4,6 +4,7 @@ use std::env::temp_dir;
 use std::fs;
 use std::io::{Error, ErrorKind};
 use std::path::PathBuf;
+use std::process::Command;
 use async_trait::async_trait;
 use serde::Deserialize;
 use wmi::WMIConnection;
@@ -72,6 +73,50 @@ impl Drop for TempFileGuard {
         tokio::task::spawn_blocking(move || {
             let _ = fs::remove_file(&path);
         });
+    }
+}
+
+struct AutoPlayGuard {
+    original_value: Option<String>
+}
+
+impl AutoPlayGuard {
+    fn new() -> Self {
+        let mut original_value = None;
+        let query = Command::new("reg")
+            .args(["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer", "/v", "NoDriveTypeAutoRun"])
+            .output();
+
+        if let Ok(output) = query {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                if line.contains("REG_DWORD") {
+                    if let Some(val) = line.split_whitespace().last() {
+                        original_value = Some(val.to_string());
+                    }
+                }
+            }
+        }
+
+        let _ = Command::new("reg")
+            .args(["add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer", "/v", "NoDriveTypeAutoRun", "/t", "REG_DWORD", "/d", "255", "/f"])
+            .output();
+
+        Self { original_value }
+    }
+}
+
+impl Drop for AutoPlayGuard {
+    fn drop(&mut self) {
+        if let Some(val) = &self.original_value {
+            let _ = Command::new("reg")
+                .args(["add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer", "/v", "NoDriveTypeAutoRun", "/t", "REG_DWORD", "/d", val, "/f"])
+                .output();
+        } else {
+            let _ = Command::new("reg")
+                .args(["delete", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer", "/v", "NoDriveTypeAutoRun", "/f"])
+                .output();
+        }
     }
 }
 
@@ -170,7 +215,7 @@ impl WindowsDiskManager {
             format!(
                 "select disk {}\n\
                 create partition primary size={}\n\
-                format fs=ntfs quick label=\"LINUX_LIVE\"\n\
+                format fs=fat32 quick label=\"LINUX_LIVE\"\n\
                 assign\n\
                 create partition primary size={}\n\
                 format fs=fat32 quick label=\"LINUX_EFI\"\n\
@@ -183,7 +228,7 @@ impl WindowsDiskManager {
             format!(
                 "select disk {}\n\
                 create partition primary size={}\n\
-                format fs=ntfs quick label=\"LINUX_LIVE\"\n\
+                format fs=fat32 quick label=\"LINUX_LIVE\"\n\
                 assign\n\
                 exit\n",
                 disk_id, iso_payload_size_mb
@@ -191,6 +236,7 @@ impl WindowsDiskManager {
         };
 
         println!("Creating Live Boot Partitions (NTFS Payload{})...", if is_uefi { " + FAT32 Driver Hook" } else { "" });
+        let _autoplay_guard = AutoPlayGuard::new();
         self.run_diskpart_script(&dp_script, format!("create_live_{}", disk_id)).await?;
 
         let mut ntfs_letter = None;
@@ -418,90 +464,6 @@ async fn check_bitlocker_status(drive_letter: Option<&str>) -> Result<(), DiskEr
     }
 
     return Ok(())
-}
-
-async fn create_uefi_boot_entry(
-    distro_name: &str,
-    device_partition: &str,
-    efi_path: &str
-) -> Result<(), DiskError> {
-    let copy_out = tokio::process::Command::new("bcdedit.exe")
-        .args(["/copy", "{bootmgr}", "/d", distro_name])
-        .output()
-        .await
-        .map_err(DiskError::OsError)?;
-
-    let copy_str = String::from_utf8_lossy(&copy_out.stdout);
-
-    let guid = if let (Some(start), Some(end)) = (copy_str.find('{'), copy_str.find('}')) {
-        &copy_str[start..=end]
-    } else {
-        return Err(DiskError::OsError(Error::new(
-            ErrorKind::Other,
-            format!("Failed to parse GUID from bcdedit output: {}", copy_str)
-        )));
-    };
-
-    println!("Created new EFI boot entry: {}", guid);
-
-    let inherited_props = [
-        "default", "displayorder", "toolsdisplayorder", "timneout", "resumeobject", "inhreit", "locale"
-    ];
-
-    for prop in inherited_props {
-        let _ = tokio::process::Command::new("bcdedit.exe")
-            .args(["/deletevalue", guid, prop])
-            .output()
-            .await;
-    }
-
-    println!("Setting device=partition={} path={}", device_partition, efi_path);
-
-    let run_cmd = |args: Vec<String>| async move {
-        let out = tokio::process::Command::new("bcdedit.exe")
-            .args(&args)
-            .output()
-            .await
-            .map_err(DiskError::OsError)?;
-
-        if !out.status.success() {
-            Err(DiskError::OsError(Error::new(
-                ErrorKind::Other,
-                format!("bcdedit {:?} failed with code {:?}", args, out.status.code())
-            )))
-        } else {
-            Ok(())
-        }
-    };
-
-    let device_arg = format!("partition={}", device_partition);
-    let guid_str = guid.to_string();
-    let distro_str = distro_name.to_string();
-    let efi_str = efi_path.to_string();
-
-    let config_result = async {
-        run_cmd(vec!["/set".to_string(), guid_str.clone(), "device".to_string(), device_arg]).await?;
-        run_cmd(vec!["/set".to_string(), guid_str.clone(), "path".to_string(), efi_str]).await?;
-        run_cmd(vec!["/set".to_string(), guid_str.clone(), "description".to_string(), distro_str]).await?;
-
-        run_cmd(vec!["/set".to_string(), "{fwbootmgr}".to_string(), "displayorder".to_string(), guid_str.clone(), "/addfirst".to_string()]).await?;
-        run_cmd(vec!["/set".to_string(), "{fwbootmgr}".to_string(), "default".to_string(), guid_str]).await?;
-
-        Ok::<(), DiskError>(())
-    }.await;
-
-    if let Err(e) = config_result {
-        println!("Error configuration boot entry: {}. Rolling back...", e);
-        let _ = tokio::process::Command::new("bcdedit.exe")
-            .args(["/delete", guid])
-            .output()
-            .await;
-
-        return Err(e);
-    }
-
-    println!("UEFI boot entry created and set as default!");
-    return Ok(());
 }
 
 #[async_trait]

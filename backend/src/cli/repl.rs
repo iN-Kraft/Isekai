@@ -15,7 +15,7 @@ use crate::infrastructure::{
     NativeValidator,
     iso_manager::IsoManager, 
     payload_manager::PayloadManager, 
-    boot_manager::BootManager,
+    boot::BootManager,
     NativeDiskManager
 };
 
@@ -294,23 +294,21 @@ impl CliREPL {
                 info!("Cloning OS Payload: {} -> {}", iso_drive_letter, ntfs_letter);
                 PayloadManager::copy_payload(&iso_drive_letter, &ntfs_letter, is_hdd).await?;
 
-                if is_uefi {
-                    if let Some(fat32_letter) = fat32_letter_opt {
-                        info!("Injecting UEFI hooks -> {}", fat32_letter);
-                        BootManager::install_uefi_driver(&fat32_letter).await?;
-                    }
+                let boot_strategy = BootManager::get_strategy(is_uefi);
+                let target_bcd_drive = if is_uefi {
+                    fat32_letter_opt.as_deref().unwrap()
                 } else {
-                    info!("Legacy BIOS host detected. Installing GRUB4DOS chainloader...");
+                    target_part.drive_letter.as_deref().unwrap_or("C:")
+                };
 
-                    let os_drive = target_part.drive_letter.as_deref().unwrap_or("C:");
+                info!("Injecting boot binaries...");
+                boot_strategy.inject_boot_binaries(target_bcd_drive, fat32_letter_opt.as_deref()).await?;
 
-                    BootManager::install_legacy_chainloader(os_drive).await?;
-                    BootManager::patch_legacy_bcd("Project Isekai", os_drive).await?;
-                    BootManager::write_grub4dos_config(&ntfs_letter).await?;
-                }
+                info!("Patching Windows BCD...");
+                boot_strategy.patch_windows_bcd("Project Isekai Live", target_bcd_drive).await?;
 
-                info!("Patching GRUB routing block...");
-                BootManager::patch_boot_configs(&ntfs_letter, "LINUX_LIVE").await?;
+                info!("Writing native boot configurations...");
+                boot_strategy.write_boot_config(&ntfs_letter).await?;
                 
                 Ok::<(), DiskError>(())
             }.await;
