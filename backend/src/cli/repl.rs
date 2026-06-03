@@ -1,3 +1,4 @@
+use std::io::{stdin, stdout, Error, ErrorKind, Write};
 use std::sync::Arc;
 use clap::Parser;
 use rustyline::{CompletionType, Config, Editor};
@@ -258,6 +259,46 @@ impl CliREPL {
             }
 
             let target_size_bytes = target_part.size_bytes - required_free_space_bytes;
+
+            // Fetch disk info for friendly display
+            let disks = self.disk_manager.get_disks().await.unwrap_or_default();
+            let disk_name = disks.iter().find(|d| d.stable_id == disk_id)
+                .map(|d| d.name.clone())
+                .unwrap_or_else(|| "Unknown Disk".to_string());
+            let drive_letter_display = target_part.drive_letter.as_deref().unwrap_or("None");
+
+            // Pre-flight CLI confirmation prompt
+            println!("\n==================================================");
+            println!("Isekai Partition Plan:");
+            println!("Target Disk: {} (ID: {})", disk_name, disk_id);
+            println!("Target Partition: {} (ID: {}, Label: '{}')", drive_letter_display, partition_id, target_part.label);
+            println!("Current Size: {} MB", target_part.size_bytes / mb_to_bytes);
+            println!("Required Free Space: {} MB", required_free_space_bytes / mb_to_bytes);
+            println!("Target Size After Shrink: {} MB", target_size_bytes / mb_to_bytes);
+            println!("Payload ISO: {}", iso_path);
+            println!("==================================================");
+
+
+            let proceed = tokio::task::spawn_blocking(|| {
+                print!("Do you want to proceed with this shrink-and-install plan? [y/N]: ");
+                let _ = stdout().flush();
+
+                let mut input = String::new();
+                if stdin().read_line(&mut input).is_ok() {
+                    input.trim().eq_ignore_ascii_case("y")
+                } else {
+                    false
+                }
+            }).await.map_err(|e| DiskError::OsError(Error::new(
+                ErrorKind::Other,
+                format!("Failed to spawn blocking task: {}", e)
+            )))?;
+
+            if !proceed {
+                return Err(DiskError::DataValidation("User aborted the workflow.".into()));
+            }
+
+            println!("Proceeding...");
 
             info!("Shrinking NTFS partition {} to {} bytes...", partition_id, target_size_bytes);
             self.disk_manager.shrink_partition(&disk_id, &partition_id, target_size_bytes).await?;

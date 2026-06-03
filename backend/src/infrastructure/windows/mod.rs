@@ -6,7 +6,7 @@ use ::wmi::WMIConnection;
 use tracing::warn;
 use crate::domain::errors::DiskError;
 use crate::domain::models::{Disk, Partition};
-use crate::infrastructure::windows::wmi::{MsftDisk, MsftPartition, MsftPhysicalDisk, MsftVolume, SharedWmi};
+use crate::infrastructure::windows::wmi::{MsftDisk, MsftPartition, MsftPhysicalDisk, MsftVolume};
 use crate::domain::traits::DiskManager;
 use crate::infrastructure::windows::diskpart::run_diskpart_script;
 use crate::infrastructure::windows::utils::{check_bitlocker_status, determine_partition_label};
