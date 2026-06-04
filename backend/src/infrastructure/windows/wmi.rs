@@ -45,4 +45,12 @@ pub struct MsftVolume {
 #[serde(rename_all = "PascalCase")]
 pub struct Win32EncryptableVolume {
     pub ProtectionStatus: u32,
+    pub LockStatus: Option<u32>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum BitLockerState {
+    Unprotected, // Safe to modify
+    Locked, // Needs unlock
+    Protected // Needs suspend
 }

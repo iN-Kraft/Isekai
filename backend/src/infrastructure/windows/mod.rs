@@ -9,7 +9,7 @@ use crate::domain::models::{Disk, Partition};
 use crate::infrastructure::windows::wmi::{MsftDisk, MsftPartition, MsftPhysicalDisk, MsftVolume};
 use crate::domain::traits::DiskManager;
 use crate::infrastructure::windows::diskpart::run_diskpart_script;
-use crate::infrastructure::windows::utils::{check_bitlocker_status, determine_partition_label};
+use crate::infrastructure::windows::utils::{get_bitlocker_state, determine_partition_label};
 
 pub mod wmi;
 pub mod diskpart;
@@ -315,8 +315,6 @@ impl DiskManager for WindowsDiskManager {
     async fn shrink_partition(&self, disk_id: &str, partition_id: &str, target_size_bytes: u64) -> Result<(), DiskError> {
         let partitions = self.get_partitions_fresh(disk_id, Some(partition_id)).await?;
         let target_part = partitions.iter().find(|p| p.id == partition_id).ok_or_else(|| DiskError::DiskNotFound(format!("Partition {} disappeared", partition_id)))?;
-
-        check_bitlocker_status(target_part.drive_letter.as_deref()).await?;
 
         println!("Attempting primary shrink method: Resize-Partition");
         let cmd_str = format!("Resize-Partition -DiskNumber {} -PartitionNumber {} -Size {}", disk_id, partition_id, target_size_bytes);

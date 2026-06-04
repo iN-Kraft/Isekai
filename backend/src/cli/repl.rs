@@ -9,7 +9,7 @@ use tokio::task::block_in_place;
 use crate::domain::traits::DiskManager;
 use crate::domain::validation::ComponentStatus;
 use crate::domain::errors::DiskError;
-use tracing::{info, error};
+use tracing::{info, error, warn};
 #[cfg(target_os = "windows")]
 use crate::infrastructure::{
     NativeDiskManager,
@@ -26,9 +26,13 @@ use crate::infrastructure::windows::autoplay::AutoPlayGuard;
 #[cfg(target_os = "windows")]
 use crate::infrastructure::windows::boot::BootManager;
 #[cfg(target_os = "windows")]
+use crate::infrastructure::windows::wmi::BitLockerState;
+#[cfg(target_os = "windows")]
 use crate::infrastructure::windows::iso_manager::IsoManager;
 #[cfg(target_os = "windows")]
 use crate::infrastructure::windows::payload_manager::PayloadManager;
+#[cfg(target_os = "windows")]
+use crate::infrastructure::windows::utils::{get_bitlocker_state, prompt_bitlocker_unlock, suspend_bitlocker};
 
 pub struct CliREPL {
     pub disk_manager: Arc<dyn DiskManager>,
@@ -299,6 +303,41 @@ impl CliREPL {
             }
 
             println!("Proceeding...");
+            info!("Checking BitLocker status for {}...", partition_id);
+            let bitlocker_state = get_bitlocker_state(target_part.drive_letter.as_deref()).await?;
+
+            if bitlocker_state != BitLockerState::Unprotected {
+                warn!("BITLOCKER DETECTED!");
+
+                if bitlocker_state == BitLockerState::Locked {
+                    println!("The target drive is currently locked and inaccessible.");
+                    println!("Do you want to unlock now?");
+                } else {
+                    println!("The target drive is encrypted. Resizing it or modifying the bootloader");
+                    println!("will trigger a Recovery Key lockout on your next reboot.");
+                    println!("Do you want to pause protection for 1 reboot to prevent this?")
+                }
+
+                let bitlocker_proceed = tokio::task::spawn_blocking(|| {
+                    print!("Continue? [y/N]: ");
+                    let _ = stdout().flush();
+                    let mut input = String::new();
+
+                    stdin().read_line(&mut input).is_ok() && input.trim().eq_ignore_ascii_case("y")
+                }).await.unwrap_or(false);
+
+                if !bitlocker_proceed {
+                    return Err(DiskError::DriveEncrypted("BitLocker must be disabled or suspended to continue".into()));
+                }
+
+                let drive_letter = target_part.drive_letter.as_deref().unwrap();
+                if bitlocker_state == BitLockerState::Locked {
+                    prompt_bitlocker_unlock(drive_letter).await?;
+                    suspend_bitlocker(drive_letter).await?;
+                } else {
+                    suspend_bitlocker(drive_letter).await?;
+                }
+            }
 
             info!("Shrinking NTFS partition {} to {} bytes...", partition_id, target_size_bytes);
             self.disk_manager.shrink_partition(&disk_id, &partition_id, target_size_bytes).await?;
