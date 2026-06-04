@@ -32,7 +32,7 @@ use crate::infrastructure::windows::iso_manager::IsoManager;
 #[cfg(target_os = "windows")]
 use crate::infrastructure::windows::payload_manager::PayloadManager;
 #[cfg(target_os = "windows")]
-use crate::infrastructure::windows::utils::{get_bitlocker_state, prompt_bitlocker_unlock, suspend_bitlocker};
+use crate::infrastructure::windows::bitlocker::BitLocker;
 
 pub struct CliREPL {
     pub disk_manager: Arc<dyn DiskManager>,
@@ -304,7 +304,7 @@ impl CliREPL {
 
             println!("Proceeding...");
             info!("Checking BitLocker status for {}...", partition_id);
-            let bitlocker_state = get_bitlocker_state(target_part.drive_letter.as_deref()).await?;
+            let bitlocker_state = BitLocker::get_state(target_part.drive_letter.as_deref()).await?;
 
             if bitlocker_state != BitLockerState::Unprotected {
                 warn!("BITLOCKER DETECTED!");
@@ -332,10 +332,10 @@ impl CliREPL {
 
                 let drive_letter = target_part.drive_letter.as_deref().unwrap();
                 if bitlocker_state == BitLockerState::Locked {
-                    prompt_bitlocker_unlock(drive_letter).await?;
-                    suspend_bitlocker(drive_letter).await?;
+                    BitLocker::prompt_unlock(drive_letter).await?;
+                    BitLocker::suspend(drive_letter).await?;
                 } else {
-                    suspend_bitlocker(drive_letter).await?;
+                    BitLocker::suspend(drive_letter).await?;
                 }
             }
 

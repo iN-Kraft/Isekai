@@ -1,6 +1,5 @@
 #![allow(non_snake_case)]
 use serde::Deserialize;
-use wmi::WMIConnection;
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
