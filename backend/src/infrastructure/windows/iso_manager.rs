@@ -1,6 +1,7 @@
-use std::fs;
-use std::io::{Error, ErrorKind};
+use std::fs::{read_dir, File};
+use std::io::{BufReader, Error, ErrorKind, Read};
 use std::path::Path;
+use sha2::{Digest, Sha256};
 use tokio::process::Command;
 use crate::domain::errors::DiskError;
 
@@ -65,7 +66,7 @@ impl IsoManager {
 
         let exists = tokio::task::spawn_blocking(move || {
             println!("DEBUG: Directory listing for [{}]:", base_path);
-            match fs::read_dir(&base_path) {
+            match read_dir(&base_path) {
                 Ok(entries) => {
                     for entry in entries.flatten() {
                         println!("  -> {:?}", entry.file_name());
@@ -87,5 +88,38 @@ impl IsoManager {
         }).await.unwrap_or(false);
 
         exists
+    }
+
+    pub async fn calculate_sha256(iso_path: &str) -> Result<String, DiskError> {
+        let path = iso_path.to_string();
+
+        let hash_result = tokio::task::spawn_blocking(move || -> Result<String, DiskError> {
+            let file = File::open(&path).map_err(DiskError::OsError)?;
+            let mut reader = BufReader::with_capacity(1024 * 1024, file);
+            let mut hasher = Sha256::new();
+
+            let mut buffer = [0; 1024 * 1024];
+            loop {
+                let n = reader.read(&mut buffer).map_err(DiskError::OsError)?;
+                if n == 0 {
+                    break;
+                }
+                hasher.update(&buffer[..n]);
+            }
+
+            let result = hasher.finalize();
+            Ok(result.iter().map(|b| format!("{:02x}", b)).collect())
+        }).await.map_err(|e| DiskError::OsError(Error::new(
+            ErrorKind::Other,
+            format!("Hash calculation task failed: {}", e)
+        )))??;
+
+        Ok(hash_result)
+    }
+
+    pub async fn verify_iso_hash(iso_path: &str, expected_hash: &str) -> Result<bool, DiskError> {
+        let computed_hash = Self::calculate_sha256(iso_path).await?;
+
+        Ok(computed_hash.eq_ignore_ascii_case(expected_hash))
     }
 }
