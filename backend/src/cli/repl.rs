@@ -10,28 +10,19 @@ use crate::domain::traits::DiskManager;
 use crate::domain::validation::ComponentStatus;
 use crate::domain::errors::DiskError;
 use tracing::{info, error, warn};
-#[cfg(target_os = "windows")]
+
 use crate::infrastructure::{
     NativeDiskManager,
     NativeValidator
 };
 
-#[cfg(target_os = "linux")]
-use crate::infrastructure::NativeValidator;
-
 use crate::cli::commands::{Commands, IsekaiCli};
 use crate::cli::helper::IsekaiHelper;
-#[cfg(target_os = "windows")]
 use crate::infrastructure::windows::autoplay::AutoPlayGuard;
-#[cfg(target_os = "windows")]
 use crate::infrastructure::windows::boot::BootManager;
-#[cfg(target_os = "windows")]
 use crate::infrastructure::windows::wmi::BitLockerState;
-#[cfg(target_os = "windows")]
 use crate::infrastructure::windows::iso_manager::IsoManager;
-#[cfg(target_os = "windows")]
 use crate::infrastructure::windows::payload_manager::PayloadManager;
-#[cfg(target_os = "windows")]
 use crate::infrastructure::windows::bitlocker::BitLocker;
 
 pub struct CliREPL {
@@ -54,7 +45,6 @@ impl CliREPL {
             Commands::Parts { disk_id } => {
                 self.handle_parts(&disk_id).await;
             }
-            #[cfg(target_os = "windows")]
             Commands::ShrinkAndInstall { disk_id, partition_id, iso_path, boot_size_mb } => {
                 if let Err(e) = self.execute_shrink_workflow(
                     disk_id, partition_id, iso_path, boot_size_mb
@@ -219,7 +209,6 @@ impl CliREPL {
         }
     }
 
-    #[cfg(target_os = "windows")]
     async fn execute_shrink_workflow(
         &self,
         disk_id: String,

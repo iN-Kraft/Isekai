@@ -28,7 +28,6 @@ pub enum Commands {
     },
     
     /// Shrink an existing NTFS partition and install the ISO alongside it
-    #[cfg(target_os = "windows")]
     ShrinkAndInstall {
         /// Target Disk Hardware ID
         #[arg(long)]
