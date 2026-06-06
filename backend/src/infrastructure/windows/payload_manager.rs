@@ -110,6 +110,7 @@ impl PayloadManager {
 
         let target_glob = format!("{}*", target_path);
         let status = Command::new("attrib")
+            .kill_on_drop(true)
             .creation_flags(COMMAND_NO_WINDOW)
             .args(["-R", &target_glob, "/S", "/D"])
             .stdout(Stdio::null())

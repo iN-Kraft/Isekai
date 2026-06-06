@@ -18,6 +18,7 @@ impl IsoManager {
         );
 
         let output = Command::new("powershell.exe")
+            .kill_on_drop(true)
             .creation_flags(COMMAND_NO_WINDOW)
             .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
             .output()
@@ -37,6 +38,7 @@ impl IsoManager {
         if drive_letter.is_empty() {
             let dismount_script = format!("Dismount-DiskImage -ImagePath '{}' -ErrorAction SilentlyContinue", iso_path);
             let _ = Command::new("powershell.exe")
+                .kill_on_drop(true)
                 .creation_flags(COMMAND_NO_WINDOW)
                 .args(["-NoProfile", "-NonInteractive", "-Command", &dismount_script])
                 .output()
@@ -55,6 +57,7 @@ impl IsoManager {
         let ps_script = format!("Dismount-DiskImage -ImagePath '{}' -ErrorAction SilentlyContinue", iso_path);
 
         let _ = Command::new("powershell.exe")
+            .kill_on_drop(true)
             .creation_flags(COMMAND_NO_WINDOW)
             .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
             .output()

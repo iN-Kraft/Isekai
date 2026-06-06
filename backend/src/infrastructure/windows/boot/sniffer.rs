@@ -1,4 +1,5 @@
 use std::path::Path;
+use tokio::fs::read_dir;
 
 pub enum IsoFlavor {
     Ubuntu { initrd_file: String },
@@ -45,8 +46,9 @@ pub async fn detect_payload(payload_drive_letter: &str) -> IsoFlavor {
         let mut k_path = "/arch/boot/x86_64/vmlinuz-linux".to_string();
         let mut i_path = "/arch/boot/x86_64/initramfs-linux.img".to_string();
 
-        if let Ok(entries) = std::fs::read_dir(Path::new(&base_path).join("arch").join("boot").join("x86_64")) {
-            for entry in entries.flatten() {
+        let arch_boot_dir = Path::new(&base_path).join("arch").join("boot").join("x86_64");
+        if let Ok(mut entries) = read_dir(arch_boot_dir).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
                 let fname = entry.file_name().into_string().unwrap_or_default();
                 if fname.starts_with("vmlinuz-linux") && !fname.contains("-lts") {
                     k_path = format!("/arch/boot/x86_64/{}", fname);

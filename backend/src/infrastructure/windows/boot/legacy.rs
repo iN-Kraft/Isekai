@@ -29,6 +29,7 @@ impl BootStrategy for LegacyBootManager {
         telemetry!(info, "Patching Windows BCD for Legacy Chainloading...");
 
         let create_out = Command::new("bcdedit.exe")
+            .kill_on_drop(true)
             .creation_flags(COMMAND_NO_WINDOW)
             .args(["/create", "/d", distro_name, "/application", "bootsector"])
             .output()
@@ -49,6 +50,7 @@ impl BootStrategy for LegacyBootManager {
 
         let run_cmd = |args: Vec<String>| async move {
             let out = Command::new("bcdedit.exe")
+                .kill_on_drop(true)
                 .creation_flags(COMMAND_NO_WINDOW)
                 .args(&args)
                 .output()
@@ -77,6 +79,7 @@ impl BootStrategy for LegacyBootManager {
 
             telemetry!(info, "Disabling Windows Fast Startup...");
             let _ = Command::new("powercfg.exe")
+                .kill_on_drop(true)
                 .creation_flags(COMMAND_NO_WINDOW)
                 .args(["/h", "off"])
                 .output()
@@ -89,6 +92,7 @@ impl BootStrategy for LegacyBootManager {
             telemetry!(error, "Error configuring BCD entry: {}. Rolling back...", e);
 
             let _ = Command::new("bcdedit.exe")
+                .kill_on_drop(true)
                 .creation_flags(COMMAND_NO_WINDOW)
                 .args(["/delete", guid])
                 .output()
