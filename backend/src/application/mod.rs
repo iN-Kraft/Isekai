@@ -1,8 +1,9 @@
 pub mod telemetry;
+pub mod state;
 
 use tokio::sync::mpsc::Sender;
 use crate::ipc::protocol::OutgoingMessage;
-use crate::ipc::state::SharedState;
+use state::SharedState;
 
 #[derive(Clone)]
 pub enum AppContext {

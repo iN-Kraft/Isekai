@@ -9,7 +9,7 @@ use tokio_util::codec::{Framed, LinesCodec};
 use crate::application::{AppContext, APP_CONTEXT};
 use crate::ipc::handler::process_request;
 use crate::ipc::protocol::{IpcRequest, OutgoingMessage};
-use crate::ipc::state::{AppState, SharedState};
+use crate::application::state::{AppState, SharedState};
 
 pub struct IpcServer {
     disk_manager: Arc<dyn DiskManager>,

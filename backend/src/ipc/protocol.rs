@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use crate::domain::models::{Disk, Partition};
 use crate::domain::validation::ValidationReport;
-use crate::ipc::state::AppState;
+use crate::application::state::AppState;
 
 #[derive(Deserialize, Debug)]
 #[serde(tag = "method")]

@@ -4,7 +4,7 @@ use crate::domain::traits::DiskManager;
 use crate::infrastructure::NativeValidator;
 use crate::infrastructure::windows::bitlocker::BitLocker;
 use crate::ipc::protocol::{IpcEvent, IpcProtocol, IpcRequest, IpcResponse, OutgoingMessage, ResponseData};
-use crate::ipc::state::SharedState;
+use crate::application::state::SharedState;
 
 pub async fn process_request(
     req: IpcRequest,

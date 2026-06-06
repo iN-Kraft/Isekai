@@ -10,7 +10,7 @@ use crate::domain::traits::DiskManager;
 use crate::domain::validation::ComponentStatus;
 use crate::domain::errors::DiskError;
 use crate::application::{AppContext, APP_CONTEXT};
-use crate::ipc::state::{AppState, SharedState};
+use crate::application::state::{AppState, SharedState, WorkflowGuard, WorkflowType};
 use std::sync::RwLock;
 use crate::infrastructure::{
     NativeDiskManager,
@@ -226,7 +226,9 @@ impl CliREPL {
         iso_path: String,
         boot_size_mb: u32,
     ) -> Result<(), DiskError> {
+        let _workflow = WorkflowGuard::start(WorkflowType::ShrinkAndInstall);
         let _autoplay_guard = AutoPlayGuard::new();
+
         let is_pre_mounted = iso_path.len() <= 3 && (iso_path.ends_with(':') || iso_path.ends_with(":\\"));
         let iso_drive_letter = if is_pre_mounted {
             let letter = iso_path.trim_end_matches('\\').to_string();
