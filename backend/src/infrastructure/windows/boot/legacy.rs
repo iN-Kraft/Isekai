@@ -3,7 +3,7 @@ use std::path::Path;
 use async_trait::async_trait;
 use tokio::process::Command;
 use crate::domain::errors::DiskError;
-use crate::infrastructure::assets::{GRLDR, GRLDR_MBR};
+use crate::infrastructure::assets::{COMMAND_NO_WINDOW, GRLDR, GRLDR_MBR};
 use crate::infrastructure::windows::boot::BootStrategy;
 use crate::infrastructure::windows::boot::sniffer::{detect_payload, IsoFlavor};
 use crate::telemetry;
@@ -29,6 +29,7 @@ impl BootStrategy for LegacyBootManager {
         telemetry!(info, "Patching Windows BCD for Legacy Chainloading...");
 
         let create_out = Command::new("bcdedit.exe")
+            .creation_flags(COMMAND_NO_WINDOW)
             .args(["/create", "/d", distro_name, "/application", "bootsector"])
             .output()
             .await
@@ -48,6 +49,7 @@ impl BootStrategy for LegacyBootManager {
 
         let run_cmd = |args: Vec<String>| async move {
             let out = Command::new("bcdedit.exe")
+                .creation_flags(COMMAND_NO_WINDOW)
                 .args(&args)
                 .output()
                 .await
@@ -75,6 +77,7 @@ impl BootStrategy for LegacyBootManager {
 
             telemetry!(info, "Disabling Windows Fast Startup...");
             let _ = Command::new("powercfg.exe")
+                .creation_flags(COMMAND_NO_WINDOW)
                 .args(["/h", "off"])
                 .output()
                 .await;
@@ -86,6 +89,7 @@ impl BootStrategy for LegacyBootManager {
             telemetry!(error, "Error configuring BCD entry: {}. Rolling back...", e);
 
             let _ = Command::new("bcdedit.exe")
+                .creation_flags(COMMAND_NO_WINDOW)
                 .args(["/delete", guid])
                 .output()
                 .await;

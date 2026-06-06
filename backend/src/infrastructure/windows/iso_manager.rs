@@ -3,7 +3,9 @@ use std::io::{BufReader, Error, ErrorKind, Read};
 use std::path::Path;
 use sha2::{Digest, Sha256};
 use tokio::process::Command;
+use crate::application::spawn_blocking_with_context;
 use crate::domain::errors::DiskError;
+use crate::infrastructure::assets::COMMAND_NO_WINDOW;
 use crate::telemetry;
 
 pub struct IsoManager;
@@ -16,6 +18,7 @@ impl IsoManager {
         );
 
         let output = Command::new("powershell.exe")
+            .creation_flags(COMMAND_NO_WINDOW)
             .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
             .output()
             .await
@@ -34,6 +37,7 @@ impl IsoManager {
         if drive_letter.is_empty() {
             let dismount_script = format!("Dismount-DiskImage -ImagePath '{}' -ErrorAction SilentlyContinue", iso_path);
             let _ = Command::new("powershell.exe")
+                .creation_flags(COMMAND_NO_WINDOW)
                 .args(["-NoProfile", "-NonInteractive", "-Command", &dismount_script])
                 .output()
                 .await;
@@ -51,6 +55,7 @@ impl IsoManager {
         let ps_script = format!("Dismount-DiskImage -ImagePath '{}' -ErrorAction SilentlyContinue", iso_path);
 
         let _ = Command::new("powershell.exe")
+            .creation_flags(COMMAND_NO_WINDOW)
             .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
             .output()
             .await;
@@ -65,7 +70,7 @@ impl IsoManager {
 
         telemetry!(debug, "Verifying ISO at base path: [{}]", base_path);
 
-        let exists = tokio::task::spawn_blocking(move || {
+        let exists = spawn_blocking_with_context(move || {
             telemetry!(debug, "Directory listing for [{}]:", base_path);
             match read_dir(&base_path) {
                 Ok(entries) => {
@@ -94,7 +99,7 @@ impl IsoManager {
     pub async fn calculate_sha256(iso_path: &str) -> Result<String, DiskError> {
         let path = iso_path.to_string();
 
-        let hash_result = tokio::task::spawn_blocking(move || -> Result<String, DiskError> {
+        let hash_result = spawn_blocking_with_context(move || -> Result<String, DiskError> {
             let file = File::open(&path).map_err(DiskError::OsError)?;
             let mut reader = BufReader::with_capacity(1024 * 1024, file);
             let mut hasher = Sha256::new();

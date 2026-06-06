@@ -1,7 +1,10 @@
 use std::io::{Error, ErrorKind};
 use crate::domain::errors::DiskError;
-use crate::infrastructure::windows::wmi::{BitLockerState, Win32EncryptableVolume};
-use wmi::WMIConnection;
+use crate::infrastructure::windows::wmi::{BitLockerState, EncryptableVolume};
+use wmi::{AuthLevel, Variant, WMIConnection};
+use crate::application::spawn_blocking_with_context;
+use crate::infrastructure::assets::COMMAND_NO_WINDOW;
+use crate::telemetry;
 
 pub struct BitLocker;
 
@@ -13,19 +16,43 @@ impl BitLocker {
         };
 
         let target_drive = letter.to_string();
-        let state = tokio::task::spawn_blocking(move || -> Result<BitLockerState, DiskError> {
+        let state = spawn_blocking_with_context(move || -> Result<BitLockerState, DiskError> {
             let wmi_con = WMIConnection::with_namespace_path("ROOT\\CIMV2\\Security\\MicrosoftVolumeEncryption")
                 .map_err(|e| DiskError::WmiError(format!("Failed to connect to BitLocker WMI: {}", e)))?;
+            wmi_con.set_proxy_blanket(AuthLevel::PktPrivacy).map_err(|e| DiskError::WmiError(format!("Failed to set proxy blanket: {}", e)))?;
 
-            let query = format!("SELECT ProtectionStatus, LockStatus FROM Win32_EncryptableVolume WHERE DriveLetter = '{}'", target_drive);
-            let results: Vec<Win32EncryptableVolume> = wmi_con.raw_query(&query).map_err(|e| DiskError::WmiError(format!("BitLocker WMI query failed: {}", e)))?;
+            let results: Vec<EncryptableVolume> = wmi_con.query().map_err(|e| DiskError::WmiError(format!("BitLocker WMI query failed: {}", e)))?;
 
-            if let Some(vol) = results.first() {
-                if vol.LockStatus == Some(1) {
-                    return Ok(BitLockerState::Locked);
+            let target_vol = results.iter().find(|v| {
+                v.drive_letter.as_deref().is_some_and(|d| {
+                    let d_clean = d.trim_end_matches(':').trim_end_matches('\\');
+                    let target_clean = target_drive.trim_end_matches(':').trim_end_matches('\\');
+                    d_clean.eq_ignore_ascii_case(target_clean)
+                })
+            });
+
+            if let Some(vol) = target_vol {
+                let method_result = wmi_con.exec_method(&vol.path, "GetLockStatus", None).map_err(|e| DiskError::WmiError(format!("Failed to execute GetLockStatus: {}", e)))?;
+
+                if let Some(out_wrapper) = method_result {
+                    let lock_variant = out_wrapper.get_property("LockStatus").map_err(|e| DiskError::WmiError(format!("Failed to parse LockStatus: {}", e)))?;
+                    let lock_status: u32 = match lock_variant {
+                        Variant::UI4(val) => val,
+                        Variant::I4(val) => val as u32,
+                        Variant::UI8(val) => val as u32,
+                        Variant::I8(val) => val as u32,
+                        _ => {
+                            telemetry!(error, "Unexpected Variant type for LockStatus: {:?}", lock_variant);
+                            0
+                        }
+                    };
+
+                    if lock_status == 1 {
+                        return Ok(BitLockerState::Locked);
+                    }
                 }
 
-                if vol.ProtectionStatus == 1 {
+                if vol.protection_status == Some(1) {
                     return Ok(BitLockerState::Protected);
                 }
             }
@@ -40,6 +67,7 @@ impl BitLocker {
         let letter = drive_letter.trim_end_matches('\\');
         let mut child = tokio::process::Command::new("bdeunlock.exe")
             .kill_on_drop(true)
+            .creation_flags(COMMAND_NO_WINDOW)
             .arg(letter)
             .spawn()
             .map_err(DiskError::OsError)?;
@@ -58,6 +86,7 @@ impl BitLocker {
         let letter = drive_letter.trim_end_matches('\\');
         let output = tokio::process::Command::new("manage-bde.exe")
             .kill_on_drop(true)
+            .creation_flags(COMMAND_NO_WINDOW)
             .args(["-protectors", "-disable", letter, "-RebootCount", "1"])
             .output()
             .await

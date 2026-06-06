@@ -9,7 +9,7 @@ use tokio::task::block_in_place;
 use crate::domain::traits::DiskManager;
 use crate::domain::validation::ComponentStatus;
 use crate::domain::errors::DiskError;
-use crate::application::{AppContext, APP_CONTEXT};
+use crate::application::{spawn_blocking_with_context, AppContext, APP_CONTEXT};
 use crate::application::state::{AppState, SharedState, WorkflowGuard, WorkflowType};
 use std::sync::RwLock;
 use crate::infrastructure::{
@@ -284,7 +284,7 @@ impl CliREPL {
             println!("==================================================");
 
 
-            let proceed = tokio::task::spawn_blocking(|| {
+            let proceed = spawn_blocking_with_context(|| {
                 print!("Do you want to proceed with this shrink-and-install plan? [y/N]: ");
                 let _ = stdout().flush();
 
@@ -319,7 +319,7 @@ impl CliREPL {
                     println!("Do you want to pause protection for 1 reboot to prevent this?")
                 }
 
-                let bitlocker_proceed = tokio::task::spawn_blocking(|| {
+                let bitlocker_proceed = spawn_blocking_with_context(|| {
                     print!("Continue? [y/N]: ");
                     let _ = stdout().flush();
                     let mut input = String::new();

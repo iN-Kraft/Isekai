@@ -4,7 +4,9 @@ use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
 use tokio::time::interval;
+use crate::application::spawn_blocking_with_context;
 use crate::domain::errors::DiskError;
+use crate::infrastructure::assets::COMMAND_NO_WINDOW;
 use crate::telemetry;
 
 pub struct PayloadManager;
@@ -19,7 +21,7 @@ impl PayloadManager {
         telemetry!(info, "Calculating payload size for {}...", source);
 
         let source_path = source.clone();
-        let total_bytes = tokio::task::spawn_blocking(move || Self::get_dir_size(source_path))
+        let total_bytes = spawn_blocking_with_context(move || Self::get_dir_size(source_path))
             .await
             .unwrap_or(0);
 
@@ -32,6 +34,7 @@ impl PayloadManager {
 
         let mut child = Command::new("robocopy")
             .kill_on_drop(true)
+            .creation_flags(COMMAND_NO_WINDOW)
             .args([
                 &source,
                 &target,
@@ -50,6 +53,7 @@ impl PayloadManager {
 
         let mut ticker = interval(Duration::from_millis(500));
         let mut last_percent = 0u8;
+        telemetry!(progress, last_percent, "{:.2} GB / {:.2} GB", 0f64, total_bytes as f64 / 1_073_741_824.0);
 
         let exit_status = loop {
             tokio::select! {
@@ -59,7 +63,7 @@ impl PayloadManager {
 
                 _ = ticker.tick() => {
                     let target_path = target.clone();
-                    let current_bytes = tokio::task::spawn_blocking(move || Self::get_dir_size(target_path))
+                    let current_bytes = spawn_blocking_with_context(move || Self::get_dir_size(target_path))
                         .await
                         .unwrap_or(0);
 
@@ -106,6 +110,7 @@ impl PayloadManager {
 
         let target_glob = format!("{}*", target_path);
         let status = Command::new("attrib")
+            .creation_flags(COMMAND_NO_WINDOW)
             .args(["-R", &target_glob, "/S", "/D"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())

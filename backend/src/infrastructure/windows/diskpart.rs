@@ -1,14 +1,16 @@
 use std::env::temp_dir;
 use std::io::{Error, ErrorKind};
 use std::path::PathBuf;
+use crate::application::spawn_blocking_with_context;
 use crate::domain::errors::DiskError;
+use crate::infrastructure::assets::COMMAND_NO_WINDOW;
 
 struct TempFileGuard(PathBuf);
 impl Drop for TempFileGuard {
     fn drop(&mut self) {
         let path = self.0.clone();
 
-        tokio::task::spawn_blocking(move || {
+        spawn_blocking_with_context(move || {
             let _ = std::fs::remove_file(&path);
         });
     }
@@ -23,6 +25,7 @@ pub async fn run_diskpart_script(script_content: &str, identifier: String) -> Re
 
     let output = tokio::process::Command::new("diskpart")
         .kill_on_drop(true)
+        .creation_flags(COMMAND_NO_WINDOW)
         .args(["/s", script_path.to_str().unwrap()])
         .output()
         .await

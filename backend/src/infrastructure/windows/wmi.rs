@@ -41,10 +41,13 @@ pub struct MsftVolume {
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(rename = "Win32_EncryptableVolume")]
 #[serde(rename_all = "PascalCase")]
-pub struct Win32EncryptableVolume {
-    pub ProtectionStatus: u32,
-    pub LockStatus: Option<u32>,
+pub struct EncryptableVolume {
+    #[serde(rename = "__Path")]
+    pub path: String,
+    pub drive_letter: Option<String>,
+    pub protection_status: Option<u32>,
 }
 
 #[derive(Debug, PartialEq)]

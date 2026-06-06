@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use regex::{Captures, Regex};
 use tokio::fs;
 use crate::domain::errors::DiskError;
-use crate::infrastructure::assets::{BOOT_X64_EFI, EXFAT_X64_EFI, NTFS_X64_EFI};
+use crate::infrastructure::assets::{BOOT_X64_EFI, COMMAND_NO_WINDOW, EXFAT_X64_EFI, NTFS_X64_EFI};
 use crate::infrastructure::windows::boot::BootStrategy;
 use crate::telemetry;
 
@@ -49,6 +49,7 @@ impl BootStrategy for UefiBootManager {
     async fn patch_windows_bcd(&self, distro_name: &str, efi_drive: &str) -> Result<(), DiskError> {
         let efi_path = "\\EFI\\Boot\\bootx64.efi";
         let copy_out = tokio::process::Command::new("bcdedit.exe")
+            .creation_flags(COMMAND_NO_WINDOW)
             .args(["/copy", "{bootmgr}", "/d", distro_name])
             .output()
             .await
@@ -73,6 +74,7 @@ impl BootStrategy for UefiBootManager {
 
         for prop in inherited_props {
             let _ = tokio::process::Command::new("bcdedit.exe")
+                .creation_flags(COMMAND_NO_WINDOW)
                 .args(["/deletevalue", guid, prop])
                 .output()
                 .await;
@@ -82,6 +84,7 @@ impl BootStrategy for UefiBootManager {
 
         let run_cmd = |args: Vec<String>| async move {
             let out = tokio::process::Command::new("bcdedit.exe")
+                .creation_flags(COMMAND_NO_WINDOW)
                 .args(&args)
                 .output()
                 .await
@@ -116,6 +119,7 @@ impl BootStrategy for UefiBootManager {
         if let Err(e) = config_result {
             telemetry!(error, "Error configuration boot entry: {}. Rolling back...", e);
             let _ = tokio::process::Command::new("bcdedit.exe")
+                .creation_flags(COMMAND_NO_WINDOW)
                 .args(["/delete", guid])
                 .output()
                 .await;

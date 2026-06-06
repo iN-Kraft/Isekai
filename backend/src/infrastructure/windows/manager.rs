@@ -8,6 +8,8 @@ use crate::domain::traits::DiskManager;
 use crate::infrastructure::windows::wmi::{MsftDisk, MsftPartition, MsftPhysicalDisk, MsftVolume};
 use crate::infrastructure::windows::utils::PartitionUtils;
 use wmi::WMIConnection;
+use crate::application::spawn_blocking_with_context;
+use crate::infrastructure::assets::COMMAND_NO_WINDOW;
 use crate::telemetry;
 
 pub struct WindowsDiskManager {
@@ -176,7 +178,7 @@ impl WindowsDiskManager {
     }
 
     pub async fn is_mechanical_drive(&self, disk_id: u32) -> Result<bool, DiskError> {
-        let is_hdd = tokio::task::spawn_blocking(move || -> Result<bool, DiskError> {
+        let is_hdd = spawn_blocking_with_context(move || -> Result<bool, DiskError> {
             let wmi_con = WindowsDiskManager::create_wmi_connection()?;
             let query = format!("SELECT MediaType FROM MSFT_PhysicalDisk WHERE DeviceId = '{}'", disk_id);
             let result: Vec<MsftPhysicalDisk> = wmi_con.raw_query(&query).map_err(|e| DiskError::WmiError(format!("PhysicalDisk Query failed: {}", e)))?;
@@ -192,7 +194,7 @@ impl WindowsDiskManager {
 impl DiskManager for WindowsDiskManager {
 
     async fn get_disks(&self) -> Result<Vec<Disk>, DiskError> {
-        let wmi_disks = tokio::task::spawn_blocking(move || -> Result<Vec<MsftDisk>, DiskError> {
+        let wmi_disks = spawn_blocking_with_context(move || -> Result<Vec<MsftDisk>, DiskError> {
             let wmi_con = WindowsDiskManager::create_wmi_connection()?;
             let results: Vec<MsftDisk> = wmi_con
                 .raw_query("SELECT * FROM MSFT_Disk")
@@ -235,7 +237,7 @@ impl DiskManager for WindowsDiskManager {
         let disk_index: u32 = disk_id.parse().map_err(|_| {
             DiskError::DiskNotFound(disk_id.to_string())
         })?;
-        let (wmi_parts, volumes) = tokio::task::spawn_blocking(move || -> Result<(Vec<MsftPartition>, Vec<MsftVolume>), DiskError> {
+        let (wmi_parts, volumes) = spawn_blocking_with_context(move || -> Result<(Vec<MsftPartition>, Vec<MsftVolume>), DiskError> {
             let wmi_con = WindowsDiskManager::create_wmi_connection()?;
             let query = format!("SELECT * FROM MSFT_Partition WHERE DiskNumber = {}", disk_index);
 
@@ -313,6 +315,7 @@ impl DiskManager for WindowsDiskManager {
 
         let output_fut = tokio::process::Command::new("powershell.exe")
             .kill_on_drop(true)
+            .creation_flags(COMMAND_NO_WINDOW)
             .args(["-NoProfile", "-NonInteractive", "-Command", &cmd_str])
             .output();
 

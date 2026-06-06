@@ -1,7 +1,7 @@
-use tokio::task::spawn_blocking;
 use crate::domain::validation::{ValidationReport, ValidationError, ComponentStatus, SystemComponent};
 use which::which;
 use wmi::WMIConnection;
+use crate::application::spawn_blocking_with_context;
 
 pub struct WindowsValidator;
 
@@ -19,7 +19,7 @@ impl WindowsValidator {
             is_critical: true
         });
 
-        let wmi_status = spawn_blocking(|| {
+        let wmi_status = spawn_blocking_with_context(|| {
             WMIConnection::with_namespace_path("ROOT\\Microsoft\\Windows\\Storage").is_ok()
         }).await.map_err(|e| ValidationError::CheckFailed(format!("Thread pool crashed: {:?}", e)))?;
 
