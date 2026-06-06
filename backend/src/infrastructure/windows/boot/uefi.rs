@@ -8,6 +8,7 @@ use tokio::fs;
 use crate::domain::errors::DiskError;
 use crate::infrastructure::assets::{BOOT_X64_EFI, EXFAT_X64_EFI, NTFS_X64_EFI};
 use crate::infrastructure::windows::boot::BootStrategy;
+use crate::telemetry;
 
 static BOOT_CONFIG_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| vec![
     Regex::new(r"(?m)(root=live:(?:CD)?LABEL=)[^\s\\]+").unwrap(),
@@ -41,7 +42,7 @@ impl BootStrategy for UefiBootManager {
         let exfat_path = Path::new(&rufus_driver_dir).join("exfat_x64.efi");
         fs::write(&exfat_path, EXFAT_X64_EFI).await.map_err(DiskError::OsError)?;
 
-        println!("Embedded UEFI drivers successfully written to {}", efi_letter);
+        telemetry!(info, "Embedded UEFI drivers successfully written to {}", efi_letter);
         Ok(())
     }
 
@@ -64,7 +65,7 @@ impl BootStrategy for UefiBootManager {
             )));
         };
 
-        println!("Created new EFI boot entry: {}", guid);
+        telemetry!(info, "Created new EFI boot entry: {}", guid);
 
         let inherited_props = [
             "default", "displayorder", "toolsdisplayorder", "timeout", "resumeobject", "inherit", "locale"
@@ -77,7 +78,7 @@ impl BootStrategy for UefiBootManager {
                 .await;
         }
 
-        println!("Setting device=partition={} path={}", efi_drive, efi_path);
+        telemetry!(info, "Setting device=partition={} path={}", efi_drive, efi_path);
 
         let run_cmd = |args: Vec<String>| async move {
             let out = tokio::process::Command::new("bcdedit.exe")
@@ -113,7 +114,7 @@ impl BootStrategy for UefiBootManager {
         }.await;
 
         if let Err(e) = config_result {
-            println!("Error configuration boot entry: {}. Rolling back...", e);
+            telemetry!(error, "Error configuration boot entry: {}. Rolling back...", e);
             let _ = tokio::process::Command::new("bcdedit.exe")
                 .args(["/delete", guid])
                 .output()
@@ -122,7 +123,7 @@ impl BootStrategy for UefiBootManager {
             return Err(e);
         }
 
-        println!("UEFI boot entry created and set as default!");
+        telemetry!(info, "UEFI boot entry created and set as default!");
         Ok(())
     }
 
@@ -173,7 +174,7 @@ impl UefiBootManager {
         }
 
         if config_files.is_empty() {
-            println!("Warning: No boot config files found to patch. This ISO might use an unknown bootloader.");
+            telemetry!(warn, "Warning: No boot config files found to patch. This ISO might use an unknown bootloader.");
             return Ok(0);
         }
 
@@ -183,7 +184,7 @@ impl UefiBootManager {
             let original_content = match fs::read_to_string(&file_path).await {
                 Ok(c) => c,
                 Err(_) => {
-                    println!("Warning: Could not read {:?} (might be a binary or locked)", file_path.file_name().unwrap());
+                    telemetry!(warn, "Warning: Could not read {:?} (might be a binary or locked)", file_path.file_name().unwrap());
                     continue;
                 }
             };
@@ -204,15 +205,15 @@ impl UefiBootManager {
 
             if file_was_patched {
                 if let Err(e) = fs::write(&file_path, &current_content).await {
-                    println!("Warning: Failed to save patched config {:?} - {}", file_path.file_name().unwrap(), e);
+                    telemetry!(warn, "Warning: Failed to save patched config {:?} - {}", file_path.file_name().unwrap(), e);
                 } else {
-                    println!("Patched boot config: {:?}", file_path.file_name().unwrap());
+                    telemetry!(info, "Patched boot config: {:?}", file_path.file_name().unwrap());
                     patched_count += 1;
                 }
             }
         }
 
-        println!("Successfully patched {} boot config file(s) with label '{}'", patched_count, new_label);
+        telemetry!(info, "Successfully patched {} boot config file(s) with label '{}'", patched_count, new_label);
         Ok(patched_count)
     }
 }

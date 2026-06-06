@@ -26,7 +26,7 @@ impl WindowsDiskManager {
     }
 
     pub async fn rollback_live_partitions(&self, disk_id: u32, _is_uefi: bool) -> Result<(), DiskError> {
-        println!("ROLLBACK: Purging incomplete partitions on disk {}", disk_id);
+        telemetry!(info, "ROLLBACK: Purging incomplete partitions on disk {}", disk_id);
 
         let dp_script = format!(
             "select disk {}\n\
@@ -54,7 +54,7 @@ impl WindowsDiskManager {
             if expected_partition_id.is_none() || partitions.iter().any(|p| p.id == expected_partition_id.unwrap()) {
                 return Ok(partitions);
             }
-            println!("Partition not found yet. Retrying in WMI sync loop...");
+            telemetry!(info, "Partition not found yet. Retrying in WMI sync loop...");
         }
 
         Err(DiskError::DiskNotFound(
@@ -71,7 +71,7 @@ impl WindowsDiskManager {
         }
 
         let partition_style = if is_uefi { "gpt" } else { "mbr" };
-        println!("== STRATEGY: WIPE DISK {} (Style: {}) ==", disk_id, partition_style.to_uppercase());
+        telemetry!(step, format!("STRATEGY: WIPE DISK {} (Style: {})", disk_id, partition_style.to_uppercase()));
 
         let dp_script = format!(
             "select disk {}\n\
@@ -109,7 +109,7 @@ impl WindowsDiskManager {
                 disk_id, iso_payload_size_mb, efi_driver_size_mb
             )
         } else {
-            println!("Legacy BIOS detected. Skipping FAT32 EFI partition creation to respect MBR limits.");
+            telemetry!(info, "Legacy BIOS detected. Skipping FAT32 EFI partition creation to respect MBR limits.");
             format!(
                 "select disk {}\n\
                 create partition primary size={}\n\
@@ -120,13 +120,13 @@ impl WindowsDiskManager {
             )
         };
 
-        println!("Creating Live Boot Partitions (NTFS Payload{})...", if is_uefi { " + FAT32 Driver Hook" } else { "" });
+        telemetry!(step, format!("Creating Live Boot Partitions (NTFS Payload{})...", if is_uefi { " + FAT32 Driver Hook" } else { "" }));
         crate::infrastructure::windows::diskpart::run_diskpart_script(&dp_script, format!("create_live_{}", disk_id)).await?;
 
         let mut ntfs_letter = None;
         let mut fat32_letter = None;
 
-        println!("Waiting for Windows VDS to map drive letters...");
+        telemetry!(info, "Waiting for Windows VDS to map drive letters...");
 
         for _ in 0..6 {
             tokio::time::sleep(Duration::from_secs(2)).await;
@@ -162,7 +162,7 @@ impl WindowsDiskManager {
             return Err(DiskError::DiskNotFound("Failed to mount FAT32 EFI partition. WMI timeout.".into()));
         }
 
-        println!("Partitions created! Payload: {}: | UEFI Hook: {:?}", ntfs_letter, fat32_letter);
+        telemetry!(info, "Partitions created! Payload: {}: | UEFI Hook: {:?}", ntfs_letter, fat32_letter);
 
         Ok((ntfs_letter, fat32_letter))
     }
@@ -308,7 +308,7 @@ impl DiskManager for WindowsDiskManager {
         let partitions = self.get_partitions_fresh(disk_id, Some(partition_id)).await?;
         let target_part = partitions.iter().find(|p| p.id == partition_id).ok_or_else(|| DiskError::DiskNotFound(format!("Partition {} disappeared", partition_id)))?;
 
-        println!("Attempting primary shrink method: Resize-Partition");
+        telemetry!(info, "Attempting primary shrink method: Resize-Partition");
         let cmd_str = format!("Resize-Partition -DiskNumber {} -PartitionNumber {} -Size {}", disk_id, partition_id, target_size_bytes);
 
         let output_fut = tokio::process::Command::new("powershell.exe")
@@ -329,7 +329,7 @@ impl DiskManager for WindowsDiskManager {
             return Ok(());
         }
 
-        println!("Resize-Partition failed. Attempting robust diskpart fallback...");
+        telemetry!(warn, "Resize-Partition failed. Attempting robust diskpart fallback...");
         let shrink_amount_bytes = target_part.size_bytes.saturating_sub(target_size_bytes);
         let shrink_amount_mb = shrink_amount_bytes / (1024 * 1024);
 

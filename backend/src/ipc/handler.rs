@@ -3,7 +3,7 @@ use tokio::sync::mpsc::Sender;
 use crate::domain::traits::DiskManager;
 use crate::infrastructure::NativeValidator;
 use crate::infrastructure::windows::bitlocker::BitLocker;
-use crate::ipc::protocol::{IpcEvent, IpcProtocol, IpcRequest, IpcResponse, OutgoingMessage, ResponseData};
+use crate::ipc::protocol::{IpcProtocol, IpcRequest, IpcResponse, OutgoingMessage, ResponseData};
 use crate::application::state::{SharedState, WorkflowGuard, WorkflowType};
 use crate::telemetry;
 
