@@ -9,8 +9,9 @@ use tokio::task::block_in_place;
 use crate::domain::traits::DiskManager;
 use crate::domain::validation::ComponentStatus;
 use crate::domain::errors::DiskError;
-use tracing::{info, error, warn};
-
+use crate::application::{AppContext, APP_CONTEXT};
+use crate::ipc::state::{AppState, SharedState};
+use std::sync::RwLock;
 use crate::infrastructure::{
     NativeDiskManager,
     NativeValidator
@@ -24,40 +25,49 @@ use crate::infrastructure::windows::wmi::BitLockerState;
 use crate::infrastructure::windows::iso_manager::IsoManager;
 use crate::infrastructure::windows::payload_manager::PayloadManager;
 use crate::infrastructure::windows::bitlocker::BitLocker;
+use crate::telemetry;
 
 pub struct CliREPL {
     pub disk_manager: Arc<dyn DiskManager>,
+    pub state: SharedState,
 }
 
 impl CliREPL {
     pub fn new(disk_manager: Arc<dyn DiskManager>) -> Self {
-        Self { disk_manager }
+        Self { 
+            disk_manager,
+            state: Arc::new(RwLock::new(AppState::default()))
+        }
     }
 
     pub async fn handle_command(&self, command: Commands) -> bool {
-        match command {
-            Commands::Check => {
-                self.handle_check().await;
-            }
-            Commands::List => {
-                self.handle_list().await;
-            }
-            Commands::Parts { disk_id } => {
-                self.handle_parts(&disk_id).await;
-            }
-            Commands::ShrinkAndInstall { disk_id, partition_id, iso_path, boot_size_mb } => {
-                if let Err(e) = self.execute_shrink_workflow(
-                    disk_id, partition_id, iso_path, boot_size_mb
-                ).await {
-                    error!("FATAL: Shrink-and-Install workflow failed: {}", e);
+        let ctx = AppContext::CLI(self.state.clone());
+
+        APP_CONTEXT.scope(ctx, async move {
+            match command {
+                Commands::Check => {
+                    self.handle_check().await;
+                }
+                Commands::List => {
+                    self.handle_list().await;
+                }
+                Commands::Parts { disk_id } => {
+                    self.handle_parts(&disk_id).await;
+                }
+                Commands::ShrinkAndInstall { disk_id, partition_id, iso_path, boot_size_mb } => {
+                    if let Err(e) = self.execute_shrink_workflow(
+                        disk_id, partition_id, iso_path, boot_size_mb
+                    ).await {
+                        telemetry!(error, "FATAL: Shrink-and-Install workflow failed: {}", e);
+                    }
+                }
+                Commands::Exit | Commands::Quit => {
+                    println!("Exiting CLI...");
+                    return true;
                 }
             }
-            Commands::Exit | Commands::Quit => {
-                println!("Exiting CLI...");
-                return true;
-            }
-        }
-        false
+            false
+        }).await
     }
 
     pub async fn handle_check(&self) {
@@ -220,10 +230,10 @@ impl CliREPL {
         let is_pre_mounted = iso_path.len() <= 3 && (iso_path.ends_with(':') || iso_path.ends_with(":\\"));
         let iso_drive_letter = if is_pre_mounted {
             let letter = iso_path.trim_end_matches('\\').to_string();
-            info!("Using pre-mounted ISO on drive: {}", letter);
+            telemetry!(info, "Using pre-mounted ISO on drive: {}", letter);
             letter
         } else {
-            info!("Mounting ISO Payload: {}", iso_path);
+            telemetry!(info, "Mounting ISO Payload: {}", iso_path);
             IsoManager::mount_iso(&iso_path).await?
         };
         
@@ -239,7 +249,7 @@ impl CliREPL {
             let mb_to_bytes = 1024_u64 * 1024;
             let required_free_space_bytes = (boot_size_mb as u64) * mb_to_bytes;
             
-            info!("Fetching live volume parameters for {}...", disk_id);
+            telemetry!(info, "Fetching live volume parameters for {}...", disk_id);
             let partitions = self.disk_manager.get_partitions(&disk_id).await?;
             let target_part = partitions.iter().find(|p| p.id == partition_id)
                 .ok_or_else(|| DiskError::PartitionNotFound(partition_id.clone(), disk_id.clone()))?;
@@ -292,11 +302,11 @@ impl CliREPL {
             }
 
             println!("Proceeding...");
-            info!("Checking BitLocker status for {}...", partition_id);
+            telemetry!(info, "Checking BitLocker status for {}...", partition_id);
             let bitlocker_state = BitLocker::get_state(target_part.drive_letter.as_deref()).await?;
 
             if bitlocker_state != BitLockerState::Unprotected {
-                warn!("BITLOCKER DETECTED!");
+                telemetry!(warn, "BITLOCKER DETECTED!");
 
                 if bitlocker_state == BitLockerState::Locked {
                     println!("The target drive is currently locked and inaccessible.");
@@ -328,10 +338,10 @@ impl CliREPL {
                 }
             }
 
-            info!("Shrinking NTFS partition {} to {} bytes...", partition_id, target_size_bytes);
+            telemetry!(info, "Shrinking NTFS partition {} to {} bytes...", partition_id, target_size_bytes);
             self.disk_manager.shrink_partition(&disk_id, &partition_id, target_size_bytes).await?;
             
-            info!("Recalculating Virtual Disk Offsets...");
+            telemetry!(info, "Recalculating Virtual Disk Offsets...");
             let refreshed_partitions = self.disk_manager.get_partitions(&disk_id).await?;
             let refreshed_target_part = refreshed_partitions.iter().find(|p| p.id == partition_id)
                 .ok_or_else(|| DiskError::PartitionNotFound(partition_id.clone(), disk_id.clone()))?;
@@ -346,7 +356,7 @@ impl CliREPL {
                 boot_size_mb
             };
 
-            info!("Allocating native LINUX_LIVE & LINUX_EFI bounds at offset {}...", target_offset_bytes);
+            telemetry!(info, "Allocating native LINUX_LIVE & LINUX_EFI bounds at offset {}...", target_offset_bytes);
             let disk_num = disk_id.parse::<u32>().map_err(|_| DiskError::DataValidation("Invalid Disk ID parameter".into()))?;
             
             let (ntfs_letter, fat32_letter_opt) = match native_manager.create_live_boot_partitions(
@@ -362,7 +372,7 @@ impl CliREPL {
             let is_hdd = native_manager.is_mechanical_drive(disk_num).await.unwrap_or(false);
 
             let post_creation_result = async {
-                info!("Cloning OS Payload: {} -> {}", iso_drive_letter, ntfs_letter);
+                telemetry!(info, "Cloning OS Payload: {} -> {}", iso_drive_letter, ntfs_letter);
                 PayloadManager::copy_payload(&iso_drive_letter, &ntfs_letter, is_hdd).await?;
 
                 let boot_strategy = BootManager::get_strategy(is_uefi);
@@ -372,20 +382,20 @@ impl CliREPL {
                     target_part.drive_letter.as_deref().unwrap_or("C:")
                 };
 
-                info!("Injecting boot binaries...");
+                telemetry!(info, "Injecting boot binaries...");
                 boot_strategy.inject_boot_binaries(target_bcd_drive, fat32_letter_opt.as_deref()).await?;
 
-                info!("Patching Windows BCD...");
+                telemetry!(info, "Patching Windows BCD...");
                 boot_strategy.patch_windows_bcd("Project Isekai Live", target_bcd_drive).await?;
 
-                info!("Writing native boot configurations...");
+                telemetry!(info, "Writing native boot configurations...");
                 boot_strategy.write_boot_config(&ntfs_letter).await?;
                 
                 Ok::<(), DiskError>(())
             }.await;
 
             if let Err(e) = post_creation_result {
-                error!("Saga failure detected. Executing explicit diskpart rollback...");
+                telemetry!(error, "Saga failure detected. Executing explicit diskpart rollback...");
                 let _ = native_manager.rollback_live_partitions(disk_num, is_uefi).await;
                 return Err(e);
             }
@@ -394,7 +404,7 @@ impl CliREPL {
         }.await;
 
         if !is_pre_mounted {
-            info!("Detaching Virtual ISO Image...");
+            telemetry!(info, "Detaching Virtual ISO Image...");
             let _ = IsoManager::dismount_iso(&iso_path).await;
         }
 

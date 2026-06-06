@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use crate::domain::traits::DiskManager;
 use std::error::Error;
 use futures::{SinkExt, StreamExt};
@@ -6,17 +6,24 @@ use tokio::net::TcpListener;
 use tokio::spawn;
 use tokio::sync::mpsc::channel;
 use tokio_util::codec::{Framed, LinesCodec};
+use crate::application::{AppContext, APP_CONTEXT};
 use crate::ipc::handler::process_request;
 use crate::ipc::protocol::{IpcRequest, OutgoingMessage};
+use crate::ipc::state::{AppState, SharedState};
 
 pub struct IpcServer {
     disk_manager: Arc<dyn DiskManager>,
     port: u16,
+    state: SharedState
 }
 
 impl IpcServer {
     pub fn new(disk_manager: Arc<dyn DiskManager>, port: u16) -> Self {
-        Self { disk_manager, port }
+        Self {
+            disk_manager,
+            port,
+            state: Arc::new(RwLock::new(AppState::default()))
+        }
     }
 
     pub async fn start(&self) -> Result<(), Box<dyn Error>> {
@@ -29,6 +36,7 @@ impl IpcServer {
             println!("Client connected: {}", remote_addr);
 
             let dm = self.disk_manager.clone();
+            let state = self.state.clone();
             spawn(async move {
                 let framed = Framed::new(socket, LinesCodec::new());
                 let (mut sink, mut stream) = framed.split();
@@ -49,9 +57,14 @@ impl IpcServer {
                             if let Ok(req) = serde_json::from_str::<IpcRequest>(&line) {
                                 let tx_clone = tx.clone();
                                 let dm_clone = dm.clone();
+                                let state_clone = state.clone();
 
                                 spawn(async move {
-                                    process_request(req, dm_clone, tx_clone).await;
+                                    let ctx = AppContext::IPC(tx_clone.clone(), state_clone.clone());
+
+                                    APP_CONTEXT.scope(ctx, async move {
+                                        process_request(req, dm_clone, tx_clone, state_clone).await;
+                                    }).await;
                                 });
                             } else {
                                 eprintln!("Received malformed JSON: {}", line);

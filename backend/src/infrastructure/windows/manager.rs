@@ -1,7 +1,6 @@
 use std::io::{Error, ErrorKind};
 use std::time::Duration;
 use async_trait::async_trait;
-use tracing::warn;
 use windows_sys::Win32::System::SystemInformation::{FirmwareTypeUefi, GetFirmwareType};
 use crate::domain::errors::DiskError;
 use crate::domain::models::{Disk, Partition};
@@ -9,6 +8,7 @@ use crate::domain::traits::DiskManager;
 use crate::infrastructure::windows::wmi::{MsftDisk, MsftPartition, MsftPhysicalDisk, MsftVolume};
 use crate::infrastructure::windows::utils::PartitionUtils;
 use wmi::WMIConnection;
+use crate::telemetry;
 
 pub struct WindowsDiskManager {
     debug_mode: bool,
@@ -151,7 +151,7 @@ impl WindowsDiskManager {
         }
 
         if ntfs_letter.is_none() || (is_uefi && fat32_letter.is_none()) {
-            warn!("WMI timeout mounting partitions. Executing rollback...");
+            telemetry!(warn, "WMI timeout mounting partitions. Executing rollback...");
             let _ = self.rollback_live_partitions(disk_id, is_uefi).await;
             return Err(DiskError::DiskNotFound("Failed to mount FAT32 partitions. WMI timeout.".into()));
         }

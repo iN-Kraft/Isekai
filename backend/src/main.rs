@@ -7,6 +7,7 @@ pub mod cli;
 pub mod domain;
 pub mod infrastructure;
 pub mod ipc;
+pub mod application;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

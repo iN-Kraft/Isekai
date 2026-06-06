@@ -2,14 +2,28 @@ use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use crate::domain::traits::DiskManager;
 use crate::infrastructure::NativeValidator;
+use crate::infrastructure::windows::bitlocker::BitLocker;
 use crate::ipc::protocol::{IpcEvent, IpcProtocol, IpcRequest, IpcResponse, OutgoingMessage, ResponseData};
+use crate::ipc::state::SharedState;
 
 pub async fn process_request(
     req: IpcRequest,
     disk_manager: Arc<dyn DiskManager>,
     tx: Sender<OutgoingMessage>,
+    state: SharedState
 ) {
     let response = match req.payload {
+        IpcProtocol::GetState => {
+            let current_state = state.read().unwrap().clone();
+
+            IpcResponse {
+                id: req.id.clone(),
+                success: true,
+                data: Some(ResponseData::AppState(current_state)),
+                error: None
+            }
+        }
+
         IpcProtocol::CheckSystem => {
             match NativeValidator::run_checks().await {
                 Ok(report) => IpcResponse {
@@ -69,6 +83,26 @@ pub async fn process_request(
                     }
                 }
                 Err(e) => build_error(&req.id, e.to_string()),
+            }
+        }
+
+        IpcProtocol::UnlockBitLocker { drive_letter } => {
+            let _ = tx.send(OutgoingMessage::Event(IpcEvent {
+                event_type: "info".to_string(),
+                message: "Waiting for user to unlock BitLocker.".to_string(),
+                percent: None
+            })).await;
+
+            match BitLocker::prompt_unlock(&drive_letter).await {
+                Ok(_) => {
+                    IpcResponse {
+                        id: req.id.clone(),
+                        success: true,
+                        data: Some(ResponseData::Empty),
+                        error: None
+                    }
+                }
+                Err(e) => build_error(&req.id, e.to_string())
             }
         }
     };

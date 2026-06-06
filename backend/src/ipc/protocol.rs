@@ -1,14 +1,17 @@
 use serde::{Deserialize, Serialize};
 use crate::domain::models::{Disk, Partition};
 use crate::domain::validation::ValidationReport;
+use crate::ipc::state::AppState;
 
 #[derive(Deserialize, Debug)]
 #[serde(tag = "method")]
 pub enum IpcProtocol {
+    GetState,
     CheckSystem,
     GetDisks,
     GetPartitions { disk_id: String },
     ShrinkPartition { disk_id: String, partition_id: String, target_size_gb: u32 },
+    UnlockBitLocker { drive_letter: String }
 }
 
 #[derive(Deserialize, Debug)]
@@ -24,7 +27,8 @@ pub enum ResponseData {
     Validation(ValidationReport),
     Disks(Vec<Disk>),
     Partitions(Vec<Partition>),
-    Empty
+    Empty,
+    AppState(AppState)
 }
 
 #[derive(Serialize, Debug)]
