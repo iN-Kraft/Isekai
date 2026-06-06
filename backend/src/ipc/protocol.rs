@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use crate::domain::models::{Disk, Partition};
 use crate::domain::validation::ValidationReport;
-use crate::application::state::AppState;
+use crate::application::state::{AppState, WorkflowType};
 
 #[derive(Deserialize, Debug)]
 #[serde(tag = "method")]
@@ -43,10 +43,12 @@ pub struct IpcResponse {
 
 #[derive(Serialize, Debug)]
 pub struct IpcEvent {
-    pub event_type: String,
+    pub event_type: String, // Either of: "progress", "step", "start", "end"
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub percent: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workflow: Option<WorkflowType>
 }
 
 #[derive(Serialize, Debug)]

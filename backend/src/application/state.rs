@@ -2,7 +2,7 @@ use std::sync::{Arc, RwLock};
 use serde::Serialize;
 use crate::telemetry;
 
-#[derive(Clone, Debug, Serialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, PartialEq, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowType {
     ShrinkAndInstall,
@@ -29,8 +29,8 @@ impl Drop for WorkflowGuard {
 pub struct AppState {
     pub active_workflow: Option<WorkflowType>,
     pub current_step: Option<String>,
-    pub last_message: Option<String>,
-    pub progress_percent: Option<u8>
+    pub step_details: Option<String>,
+    pub step_progress: Option<u8>
 }
 
 pub type SharedState = Arc<RwLock<AppState>>;

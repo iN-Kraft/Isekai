@@ -4,7 +4,8 @@ use crate::domain::traits::DiskManager;
 use crate::infrastructure::NativeValidator;
 use crate::infrastructure::windows::bitlocker::BitLocker;
 use crate::ipc::protocol::{IpcEvent, IpcProtocol, IpcRequest, IpcResponse, OutgoingMessage, ResponseData};
-use crate::application::state::SharedState;
+use crate::application::state::{SharedState, WorkflowGuard, WorkflowType};
+use crate::telemetry;
 
 pub async fn process_request(
     req: IpcRequest,
@@ -61,19 +62,12 @@ pub async fn process_request(
         }
 
         IpcProtocol::ShrinkPartition { disk_id, partition_id, target_size_gb } => {
-            let _ = tx.send(OutgoingMessage::Event(IpcEvent {
-                event_type: "progress".to_string(),
-                message: format!("Initializing shrink for Partition {}...", partition_id),
-                percent: Some(10)
-            })).await;
+            let _workflow = WorkflowGuard::start(WorkflowType::ShrinkAndInstall);
+            telemetry!(step, format!("Initializing shrink for Partition {}...", partition_id));
 
             match disk_manager.shrink_partition(&disk_id, &partition_id, target_size_gb as u64).await {
                 Ok(_) => {
-                    let _ = tx.send(OutgoingMessage::Event(IpcEvent {
-                        event_type: "progress".to_string(),
-                        message: "Shrink complete.".to_string(),
-                        percent: Some(100)
-                    })).await;
+                    telemetry!(info, "Shrink complete.");
 
                     IpcResponse {
                         id: req.id.clone(),
@@ -87,11 +81,7 @@ pub async fn process_request(
         }
 
         IpcProtocol::UnlockBitLocker { drive_letter } => {
-            let _ = tx.send(OutgoingMessage::Event(IpcEvent {
-                event_type: "info".to_string(),
-                message: "Waiting for user to unlock BitLocker.".to_string(),
-                percent: None
-            })).await;
+            telemetry!(info, "Waiting for user to unlock BitLocker.");
 
             match BitLocker::prompt_unlock(&drive_letter).await {
                 Ok(_) => {
