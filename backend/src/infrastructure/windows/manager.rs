@@ -1,6 +1,7 @@
 use std::io::{Error, ErrorKind};
 use std::time::Duration;
 use async_trait::async_trait;
+use tokio::process::Command;
 use windows_sys::Win32::System::SystemInformation::{FirmwareTypeUefi, GetFirmwareType};
 use crate::domain::errors::DiskError;
 use crate::domain::models::{Disk, Partition};
@@ -93,7 +94,6 @@ impl WindowsDiskManager {
     pub async fn create_live_boot_partitions(
         &self,
         disk_id: u32,
-        _target_offset_bytes: u64,
         iso_payload_size_mb: u32,
         is_uefi: bool
     ) -> Result<(String, Option<String>), DiskError> {
@@ -187,6 +187,35 @@ impl WindowsDiskManager {
         }).await.map_err(|e| DiskError::DataValidation(format!("Thread Pool crashed: {}", e)))??;
 
         Ok(is_hdd)
+    }
+
+    pub async fn get_max_shrink_size(&self, drive_letter: &str) -> Result<u64, DiskError> {
+        let clean_letter = drive_letter.trim_end_matches(':').trim_end_matches('\\');
+        let ps_script = format!(
+            "$size = Get-PartitionSupportedSize -DriveLetter '{}' -ErrorAction Stop; [PSCustomObject]@{{ SizeMin = $size.SizeMin; SizeMax = $size.SizeMax }} | ConvertTo-Json -Compress",
+            clean_letter
+        );
+
+        let output = Command::new("powershell.exe")
+            .kill_on_drop(true)
+            .no_window()
+            .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
+            .output()
+            .await
+            .map_err(DiskError::OsError)?;
+
+        if !output.status.success() {
+            return Err(DiskError::DataValidation("Failed to calculate maximum shrink size".into()));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
+            let size_min = json["SizeMin"].as_u64().unwrap_or(u64::MAX);
+            return Ok(size_min);
+        }
+
+        Err(DiskError::DataValidation("Failed to parse shrink size from Windows API".into()))
     }
 }
 

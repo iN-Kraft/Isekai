@@ -8,6 +8,7 @@ pub mod payload_manager;
 pub mod bitlocker;
 pub mod planner;
 pub mod manager;
+pub mod saga;
 
 pub use manager::WindowsDiskManager;
 pub use wmi::{MsftDisk, MsftPartition, MsftPhysicalDisk, MsftVolume};

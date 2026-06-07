@@ -25,6 +25,7 @@ use crate::infrastructure::windows::wmi::BitLockerState;
 use crate::infrastructure::windows::iso_manager::IsoManager;
 use crate::infrastructure::windows::payload_manager::PayloadManager;
 use crate::infrastructure::windows::bitlocker::BitLocker;
+use crate::infrastructure::windows::saga::{Compensation, SagaOrchestrator};
 use crate::telemetry;
 
 pub struct CliREPL {
@@ -340,41 +341,45 @@ impl CliREPL {
                 }
             }
 
-            telemetry!(info, "Shrinking NTFS partition {} to {} bytes...", partition_id, target_size_bytes);
-            self.disk_manager.shrink_partition(&disk_id, &partition_id, target_size_bytes).await?;
-            
-            telemetry!(info, "Recalculating Virtual Disk Offsets...");
-            let refreshed_partitions = self.disk_manager.get_partitions(&disk_id).await?;
-            let refreshed_target_part = refreshed_partitions.iter().find(|p| p.id == partition_id)
-                .ok_or_else(|| DiskError::PartitionNotFound(partition_id.clone(), disk_id.clone()))?;
-                
-            let target_offset_bytes = refreshed_target_part.offset_bytes + refreshed_target_part.size_bytes;
+            let mut saga = SagaOrchestrator::new();
             let native_manager = NativeDiskManager::new(false);
             let is_uefi = NativeDiskManager::is_uefi_host();
 
-            let payload_size_mb = if is_uefi {
-                boot_size_mb.saturating_sub(50)
-            } else {
-                boot_size_mb
-            };
+            let destructive_phase = async {
+                telemetry!(info, "Shrinking NTFS partition {} to {} bytes...", partition_id, target_size_bytes);
+                self.disk_manager.shrink_partition(&disk_id, &partition_id, target_size_bytes).await?;
 
-            telemetry!(info, "Allocating native LINUX_LIVE & LINUX_EFI bounds at offset {}...", target_offset_bytes);
-            let disk_num = disk_id.parse::<u32>().map_err(|_| DiskError::DataValidation("Invalid Disk ID parameter".into()))?;
-            
-            let (ntfs_letter, fat32_letter_opt) = match native_manager.create_live_boot_partitions(
-                disk_num,
-                target_offset_bytes,
-                payload_size_mb,
-                is_uefi
-            ).await {
-                Ok(letters) => letters,
-                Err(e) => return Err(e),
-            };
+                saga.push(Compensation::ExtendSystemPartition {
+                    disk_id: disk_id.clone(),
+                    partition_id: partition_id.clone()
+                });
 
-            let is_hdd = native_manager.is_mechanical_drive(disk_num).await.unwrap_or(false);
+                telemetry!(info, "Recalculating Virtual Disk Offsets...");
+                let refreshed_partitions = self.disk_manager.get_partitions(&disk_id).await?;
+                let refreshed_target_part = refreshed_partitions.iter().find(|p| p.id == partition_id)
+                    .ok_or_else(|| DiskError::PartitionNotFound(partition_id.clone(), disk_id.clone()))?;
 
-            let post_creation_result = async {
+                let payload_size_mb = if is_uefi {
+                    boot_size_mb.saturating_sub(50)
+                } else {
+                    boot_size_mb
+                };
+
+                let disk_num = disk_id.parse::<u32>().map_err(|_| DiskError::DataValidation("Invalid Disk ID parameter".into()))?;
+
+                let (ntfs_letter, fat32_letter_opt) = match native_manager.create_live_boot_partitions(disk_num, payload_size_mb, is_uefi).await {
+                    Ok(letters) => letters,
+                    Err(e) => return Err(e),
+                };
+
+                saga.push(Compensation::DeletePartitions {
+                    disk_id: disk_num,
+                    is_uefi
+                });
+
+
                 telemetry!(info, "Cloning OS Payload: {} -> {}", iso_drive_letter, ntfs_letter);
+                let is_hdd = native_manager.is_mechanical_drive(disk_num).await.unwrap_or(false);
                 PayloadManager::copy_payload(&iso_drive_letter, &ntfs_letter, is_hdd).await?;
 
                 let boot_strategy = BootManager::get_strategy(is_uefi);
@@ -392,13 +397,12 @@ impl CliREPL {
 
                 telemetry!(info, "Writing native boot configurations...");
                 boot_strategy.write_boot_config(&ntfs_letter).await?;
-                
+
                 Ok::<(), DiskError>(())
             }.await;
 
-            if let Err(e) = post_creation_result {
-                telemetry!(error, "Saga failure detected. Executing explicit diskpart rollback...");
-                let _ = native_manager.rollback_live_partitions(disk_num, is_uefi).await;
+            if let Err(e) = destructive_phase {
+                saga.abort(&native_manager).await;
                 return Err(e);
             }
 
