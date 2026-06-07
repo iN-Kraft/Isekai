@@ -55,9 +55,9 @@ impl CliREPL {
                 Commands::Parts { disk_id } => {
                     self.handle_parts(&disk_id).await;
                 }
-                Commands::ShrinkAndInstall { disk_id, partition_id, iso_path, boot_size_mb } => {
+                Commands::ShrinkAndInstall { disk_id, partition_id, iso_path } => {
                     if let Err(e) = self.execute_shrink_workflow(
-                        disk_id, partition_id, iso_path, boot_size_mb
+                        disk_id, partition_id, iso_path
                     ).await {
                         telemetry!(error, "FATAL: Shrink-and-Install workflow failed: {}", e);
                     }
@@ -225,7 +225,6 @@ impl CliREPL {
         disk_id: String,
         partition_id: String,
         iso_path: String,
-        boot_size_mb: u32,
     ) -> Result<(), DiskError> {
         let _workflow = WorkflowGuard::start(WorkflowType::ShrinkAndInstall);
         let _autoplay_guard = AutoPlayGuard::new();
@@ -250,7 +249,20 @@ impl CliREPL {
         
         let workflow_result = async {
             let mb_to_bytes = 1024_u64 * 1024;
-            let required_free_space_bytes = (boot_size_mb as u64) * mb_to_bytes;
+
+            telemetry!(info, "Calculating required partition size based on payload...");
+            let iso_base_path = format!("{}:\\", iso_drive_letter.trim_end_matches(':'));
+            let payload_size_bytes = spawn_blocking_with_context(move || {
+                PayloadManager::get_dir_size(iso_base_path)
+            }).await.unwrap_or(0);
+
+            if payload_size_bytes <= 0 {
+                return Err(DiskError::DataValidation("Failed to read ISO contents or ISO is empty.".into()));
+            }
+
+            let buffer_bytes = 512 * mb_to_bytes;
+            let required_free_space_bytes = payload_size_bytes + buffer_bytes;
+            let boot_size_mb = (required_free_space_bytes / mb_to_bytes) as u32;
             
             telemetry!(info, "Fetching live volume parameters for {}...", disk_id);
             let partitions = self.disk_manager.get_partitions(&disk_id).await?;
@@ -265,6 +277,20 @@ impl CliREPL {
             }
 
             let target_size_bytes = target_part.size_bytes - required_free_space_bytes;
+            let native_manager = NativeDiskManager::new(false);
+            let is_uefi = NativeDiskManager::is_uefi_host();
+
+            let target_letter = target_part.drive_letter.as_deref().unwrap_or("C:");
+            telemetry!(info, "Querying NTFS driver for maximum shrink boundary on {}...", target_letter);
+
+            let size_min_bytes = native_manager.get_max_shrink_size(target_letter).await?;
+
+            if target_size_bytes < size_min_bytes {
+                return Err(DiskError::DataValidation(format!(
+                    "Windows refuses to shrink the volume this much due to unmoveable system files (like Pagefile or Hibernation). The smallest possible size is {} MB",
+                    size_min_bytes / mb_to_bytes
+                )));
+            }
 
             // Fetch disk info for friendly display
             let disks = self.disk_manager.get_disks().await.unwrap_or_default();
@@ -342,8 +368,6 @@ impl CliREPL {
             }
 
             let mut saga = SagaOrchestrator::new();
-            let native_manager = NativeDiskManager::new(false);
-            let is_uefi = NativeDiskManager::is_uefi_host();
 
             let destructive_phase = async {
                 telemetry!(info, "Shrinking NTFS partition {} to {} bytes...", partition_id, target_size_bytes);
@@ -353,11 +377,6 @@ impl CliREPL {
                     disk_id: disk_id.clone(),
                     partition_id: partition_id.clone()
                 });
-
-                telemetry!(info, "Recalculating Virtual Disk Offsets...");
-                let refreshed_partitions = self.disk_manager.get_partitions(&disk_id).await?;
-                let refreshed_target_part = refreshed_partitions.iter().find(|p| p.id == partition_id)
-                    .ok_or_else(|| DiskError::PartitionNotFound(partition_id.clone(), disk_id.clone()))?;
 
                 let payload_size_mb = if is_uefi {
                     boot_size_mb.saturating_sub(50)
@@ -399,11 +418,24 @@ impl CliREPL {
                 boot_strategy.write_boot_config(&ntfs_letter).await?;
 
                 Ok::<(), DiskError>(())
-            }.await;
+            };
 
-            if let Err(e) = destructive_phase {
-                saga.abort(&native_manager).await;
-                return Err(e);
+            tokio::select! {
+                result = destructive_phase => {
+                    if let Err(e) = result {
+                        saga.abort(&native_manager).await;
+                        return Err(e);
+                    }
+                }
+
+                _ = tokio::signal::ctrl_c() => {
+                    telemetry!(error, "Keyboard Interrupt (Ctrl+C) detected! Safely abort installation...");
+                    saga.abort(&native_manager).await;
+                    return Err(DiskError::OsError(Error::new(
+                        ErrorKind::Interrupted,
+                        "Installation aborted by user via Ctrl+C"
+                    )));
+                }
             }
 
             Ok(())

@@ -107,7 +107,7 @@ impl Completer for IsekaiHelper {
 
             // 2. Completing flags themselves
             if word.starts_with("--") || is_space {
-                let flags = vec!["--disk-id", "--iso-path", "--partition-id", "--boot-size-mb"];
+                let flags = vec!["--disk-id", "--iso-path", "--partition-id"];
 
                 for flag in flags {
                     if flag.starts_with(word) {

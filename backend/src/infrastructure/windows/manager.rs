@@ -10,6 +10,7 @@ use crate::infrastructure::windows::wmi::{MsftDisk, MsftPartition, MsftPhysicalD
 use crate::infrastructure::windows::utils::PartitionUtils;
 use wmi::WMIConnection;
 use crate::application::spawn_blocking_with_context;
+use crate::domain::{PARTITION_LABEL_EFI, PARTITION_LABEL_LIVE};
 use crate::infrastructure::CommandExt;
 use crate::telemetry;
 
@@ -33,12 +34,12 @@ impl WindowsDiskManager {
 
         let dp_script = format!(
             "select disk {}\n\
-            select volume LINUX_LIVE\n\
+            select volume {}\n\
             delete volume\n\
-            select volume LINUX_EFI\n\
+            select volume {}\n\
             delete volume\n\
             exit\n",
-            disk_id
+            disk_id, PARTITION_LABEL_LIVE, PARTITION_LABEL_EFI
         );
         crate::infrastructure::windows::diskpart::run_diskpart_script(&dp_script, format!("rollback_{}", disk_id)).await
     }
@@ -102,23 +103,23 @@ impl WindowsDiskManager {
             format!(
                 "select disk {}\n\
                 create partition primary size={}\n\
-                format fs=fat32 quick label=\"LINUX_LIVE\"\n\
+                format fs=fat32 quick label=\"{}\"\n\
                 assign\n\
                 create partition primary size={}\n\
-                format fs=fat32 quick label=\"LINUX_EFI\"\n\
+                format fs=fat32 quick label=\"{}\"\n\
                 assign\n\
                 exit\n",
-                disk_id, iso_payload_size_mb, efi_driver_size_mb
+                disk_id, iso_payload_size_mb, PARTITION_LABEL_LIVE, efi_driver_size_mb, PARTITION_LABEL_EFI
             )
         } else {
             telemetry!(info, "Legacy BIOS detected. Skipping FAT32 EFI partition creation to respect MBR limits.");
             format!(
                 "select disk {}\n\
                 create partition primary size={}\n\
-                format fs=fat32 quick label=\"LINUX_LIVE\"\n\
+                format fs=fat32 quick label=\"{}\"\n\
                 assign\n\
                 exit\n",
-                disk_id, iso_payload_size_mb
+                disk_id, iso_payload_size_mb, PARTITION_LABEL_LIVE
             )
         };
 
@@ -137,13 +138,13 @@ impl WindowsDiskManager {
 
             if ntfs_letter.is_none() {
                 ntfs_letter = fresh_parts.iter()
-                    .find(|p| p.label.contains("LINUX_LIVE"))
+                    .find(|p| p.label.contains(PARTITION_LABEL_LIVE))
                     .and_then(|p| p.drive_letter.clone());
             }
 
             if is_uefi && fat32_letter.is_none() {
                 fat32_letter = fresh_parts.iter()
-                    .find(|p| p.label.contains("LINUX_EFI"))
+                    .find(|p| p.label.contains(PARTITION_LABEL_EFI))
                     .and_then(|p| p.drive_letter.clone());
             }
 

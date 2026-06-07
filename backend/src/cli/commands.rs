@@ -38,9 +38,6 @@ pub enum Commands {
         /// Absolute path to the payload ISO
         #[arg(long)]
         iso_path: String,
-        /// Boot partition size overhead in MB
-        #[arg(long)]
-        boot_size_mb: u32,
     },
 
     /// Exit the CLI

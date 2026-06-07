@@ -3,6 +3,7 @@ use std::path::Path;
 use async_trait::async_trait;
 use tokio::process::Command;
 use crate::domain::errors::DiskError;
+use crate::domain::PARTITION_LABEL_LIVE;
 use crate::infrastructure::assets::{GRLDR, GRLDR_MBR};
 use crate::infrastructure::CommandExt;
 use crate::infrastructure::windows::boot::BootStrategy;
@@ -135,37 +136,37 @@ impl BootStrategy for LegacyBootManager {
                 menu_content.push_str(&format!("\
                     title Project Isekai
                     find --set-root {}
-                    kernel {} archisobasedir=arch archisolabel=LINUX_LIVE quiet splash
+                    kernel {} archisobasedir=arch archisolabel={} quiet splash
                     initrd {}
 
                     title Project Isekai (Fallback)
                     find --set-root {}
-                    kernel {} archisobasedir=arch archisolabel=LINUX_LIVE nomodeset
+                    kernel {} archisobasedir=arch archisolabel={} nomodeset
                     initrd {}
-                ", kernel_path, kernel_path, initrd_path, kernel_path, kernel_path, initrd_path));
+                ", kernel_path, kernel_path, PARTITION_LABEL_LIVE, initrd_path, kernel_path, kernel_path, PARTITION_LABEL_LIVE, initrd_path));
             }
             IsoFlavor::Fedora { kernel_path, initrd_path } => {
                 menu_content.push_str(&format!("\
                     title Project Isekai (Live Desktop Mode)
                     find --set-root {}
-                    kernel {} root=live:LABEL=LINUX_LIVE rd.live.image quiet splash
+                    kernel {} root=live:LABEL={} rd.live.image quiet splash
                     initrd {}
 
                     title Project Isekai (Fallback - Live Desktop Mode)
                     find --set-root {}
-                    kernel {} root=live:LABEL=LINUX_LIVE rd.live.image nomodeset
+                    kernel {} root=live:LABEL={} rd.live.image nomodeset
                     initrd {}
 
                     title Project Isekai (Installer Mode - 8GB+ RAM Recommended)
                     find --set-root {}
-                    kernel {} root=live:LABEL=LINUX_LIVE rd.live.image rd.live.ram=1 quiet splash
+                    kernel {} root=live:LABEL={} rd.live.image rd.live.ram=1 quiet splash
                     initrd {}
 
                     title Project Isekai (Fallback - Installer Mode)
                     find --set-root {}
-                    kernel {} root=live:LABEL=LINUX_LIVE rd.live.image rd.live.ram=1 nomodeset
+                    kernel {} root=live:LABEL={} rd.live.image rd.live.ram=1 nomodeset
                     initrd {}
-                ", kernel_path, kernel_path, initrd_path, kernel_path, kernel_path, initrd_path, kernel_path, kernel_path, initrd_path, kernel_path, kernel_path, initrd_path));
+                ", kernel_path, kernel_path, PARTITION_LABEL_LIVE, initrd_path, kernel_path, kernel_path, PARTITION_LABEL_LIVE, initrd_path, kernel_path, kernel_path, PARTITION_LABEL_LIVE, initrd_path, kernel_path, kernel_path, PARTITION_LABEL_LIVE, initrd_path));
             }
             IsoFlavor::Unknown => {
                 menu_content.push_str("\

@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use regex::{Captures, Regex};
 use tokio::fs;
 use crate::domain::errors::DiskError;
+use crate::domain::PARTITION_LABEL_LIVE;
 use crate::infrastructure::assets::{BOOT_X64_EFI, EXFAT_X64_EFI, NTFS_X64_EFI};
 use crate::infrastructure::CommandExt;
 use crate::infrastructure::windows::boot::BootStrategy;
@@ -137,7 +138,7 @@ impl BootStrategy for UefiBootManager {
     }
 
     async fn write_boot_config(&self, payload_drive: &str) -> Result<(), DiskError> {
-        Self::patch_boot_configs(payload_drive, "LINUX_LIVE").await?;
+        Self::patch_boot_configs(payload_drive, PARTITION_LABEL_LIVE).await?;
         Ok(())
     }
 }

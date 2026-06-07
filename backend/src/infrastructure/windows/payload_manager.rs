@@ -128,7 +128,7 @@ impl PayloadManager {
         Ok(())
     }
 
-    fn get_dir_size(path: impl AsRef<Path>) -> u64 {
+    pub fn get_dir_size(path: impl AsRef<Path>) -> u64 {
         let mut size = 0;
         if let Ok(entries) = std::fs::read_dir(path) {
             for entry in entries.flatten() {
