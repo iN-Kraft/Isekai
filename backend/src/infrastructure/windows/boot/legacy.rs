@@ -3,7 +3,8 @@ use std::path::Path;
 use async_trait::async_trait;
 use tokio::process::Command;
 use crate::domain::errors::DiskError;
-use crate::infrastructure::assets::{COMMAND_NO_WINDOW, GRLDR, GRLDR_MBR};
+use crate::infrastructure::assets::{GRLDR, GRLDR_MBR};
+use crate::infrastructure::CommandExt;
 use crate::infrastructure::windows::boot::BootStrategy;
 use crate::infrastructure::windows::boot::sniffer::{detect_payload, IsoFlavor};
 use crate::telemetry;
@@ -30,7 +31,7 @@ impl BootStrategy for LegacyBootManager {
 
         let create_out = Command::new("bcdedit.exe")
             .kill_on_drop(true)
-            .creation_flags(COMMAND_NO_WINDOW)
+            .no_window()
             .args(["/create", "/d", distro_name, "/application", "bootsector"])
             .output()
             .await
@@ -51,7 +52,7 @@ impl BootStrategy for LegacyBootManager {
         let run_cmd = |args: Vec<String>| async move {
             let out = Command::new("bcdedit.exe")
                 .kill_on_drop(true)
-                .creation_flags(COMMAND_NO_WINDOW)
+                .no_window()
                 .args(&args)
                 .output()
                 .await
@@ -80,7 +81,7 @@ impl BootStrategy for LegacyBootManager {
             telemetry!(info, "Disabling Windows Fast Startup...");
             let _ = Command::new("powercfg.exe")
                 .kill_on_drop(true)
-                .creation_flags(COMMAND_NO_WINDOW)
+                .no_window()
                 .args(["/h", "off"])
                 .output()
                 .await;
@@ -93,7 +94,7 @@ impl BootStrategy for LegacyBootManager {
 
             let _ = Command::new("bcdedit.exe")
                 .kill_on_drop(true)
-                .creation_flags(COMMAND_NO_WINDOW)
+                .no_window()
                 .args(["/delete", guid])
                 .output()
                 .await;

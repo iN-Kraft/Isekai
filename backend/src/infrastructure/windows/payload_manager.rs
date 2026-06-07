@@ -6,7 +6,7 @@ use tokio::process::Command;
 use tokio::time::interval;
 use crate::application::spawn_blocking_with_context;
 use crate::domain::errors::DiskError;
-use crate::infrastructure::assets::COMMAND_NO_WINDOW;
+use crate::infrastructure::CommandExt;
 use crate::telemetry;
 
 pub struct PayloadManager;
@@ -34,7 +34,7 @@ impl PayloadManager {
 
         let mut child = Command::new("robocopy")
             .kill_on_drop(true)
-            .creation_flags(COMMAND_NO_WINDOW)
+            .no_window()
             .args([
                 &source,
                 &target,
@@ -111,7 +111,7 @@ impl PayloadManager {
         let target_glob = format!("{}*", target_path);
         let status = Command::new("attrib")
             .kill_on_drop(true)
-            .creation_flags(COMMAND_NO_WINDOW)
+            .no_window()
             .args(["-R", &target_glob, "/S", "/D"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())

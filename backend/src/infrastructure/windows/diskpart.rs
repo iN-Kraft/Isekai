@@ -3,7 +3,7 @@ use std::io::{Error, ErrorKind};
 use std::path::PathBuf;
 use crate::application::spawn_blocking_with_context;
 use crate::domain::errors::DiskError;
-use crate::infrastructure::assets::COMMAND_NO_WINDOW;
+use crate::infrastructure::CommandExt;
 
 struct TempFileGuard(PathBuf);
 impl Drop for TempFileGuard {
@@ -23,10 +23,14 @@ pub async fn run_diskpart_script(script_content: &str, identifier: String) -> Re
 
     tokio::fs::write(&script_path, script_content).await.map_err(DiskError::OsError)?;
 
+    let script_path_str = script_path.to_str().ok_or_else(|| {
+        DiskError::OsError(Error::new(ErrorKind::InvalidData, "Temp path contains invalid UTF-8"))
+    })?;
+
     let output = tokio::process::Command::new("diskpart")
         .kill_on_drop(true)
-        .creation_flags(COMMAND_NO_WINDOW)
-        .args(["/s", script_path.to_str().unwrap()])
+        .no_window()
+        .args(["/s", script_path_str])
         .output()
         .await
         .map_err(DiskError::OsError)?;

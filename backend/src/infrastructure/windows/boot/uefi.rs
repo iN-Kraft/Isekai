@@ -6,7 +6,8 @@ use async_trait::async_trait;
 use regex::{Captures, Regex};
 use tokio::fs;
 use crate::domain::errors::DiskError;
-use crate::infrastructure::assets::{BOOT_X64_EFI, COMMAND_NO_WINDOW, EXFAT_X64_EFI, NTFS_X64_EFI};
+use crate::infrastructure::assets::{BOOT_X64_EFI, EXFAT_X64_EFI, NTFS_X64_EFI};
+use crate::infrastructure::CommandExt;
 use crate::infrastructure::windows::boot::BootStrategy;
 use crate::telemetry;
 
@@ -26,7 +27,7 @@ pub struct UefiBootManager;
 #[async_trait]
 impl BootStrategy for UefiBootManager {
     async fn inject_boot_binaries(&self, _os_drive: &str, efi_drive: Option<&str>) -> Result<(), DiskError> {
-        let efi_letter = efi_drive.unwrap();
+        let efi_letter = efi_drive.ok_or_else(|| DiskError::DataValidation("EFI drive letter required for UEFI boot injection".into()))?;
         let efi_boot_dir = format!("{}:\\EFI\\Boot", efi_letter);
         let rufus_driver_dir = format!("{}:\\EFI\\Rufus", efi_letter);
 
@@ -50,7 +51,7 @@ impl BootStrategy for UefiBootManager {
         let efi_path = "\\EFI\\Boot\\bootx64.efi";
         let copy_out = tokio::process::Command::new("bcdedit.exe")
             .kill_on_drop(true)
-            .creation_flags(COMMAND_NO_WINDOW)
+            .no_window()
             .args(["/copy", "{bootmgr}", "/d", distro_name])
             .output()
             .await
@@ -76,7 +77,7 @@ impl BootStrategy for UefiBootManager {
         for prop in inherited_props {
             let _ = tokio::process::Command::new("bcdedit.exe")
                 .kill_on_drop(true)
-                .creation_flags(COMMAND_NO_WINDOW)
+                .no_window()
                 .args(["/deletevalue", guid, prop])
                 .output()
                 .await;
@@ -87,7 +88,7 @@ impl BootStrategy for UefiBootManager {
         let run_cmd = |args: Vec<String>| async move {
             let out = tokio::process::Command::new("bcdedit.exe")
                 .kill_on_drop(true)
-                .creation_flags(COMMAND_NO_WINDOW)
+                .no_window()
                 .args(&args)
                 .output()
                 .await
@@ -123,7 +124,7 @@ impl BootStrategy for UefiBootManager {
             telemetry!(error, "Error configuration boot entry: {}. Rolling back...", e);
             let _ = tokio::process::Command::new("bcdedit.exe")
                 .kill_on_drop(true)
-                .creation_flags(COMMAND_NO_WINDOW)
+                .no_window()
                 .args(["/delete", guid])
                 .output()
                 .await;
@@ -189,10 +190,11 @@ impl UefiBootManager {
         let mut patched_count = 0;
 
         for file_path in config_files {
+            let display_name = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("Unknown File");
             let original_content = match fs::read_to_string(&file_path).await {
                 Ok(c) => c,
                 Err(_) => {
-                    telemetry!(warn, "Warning: Could not read {:?} (might be a binary or locked)", file_path.file_name().unwrap());
+                    telemetry!(warn, "Warning: Could not read {:?} (might be a binary or locked)", display_name);
                     continue;
                 }
             };
@@ -213,9 +215,9 @@ impl UefiBootManager {
 
             if file_was_patched {
                 if let Err(e) = fs::write(&file_path, &current_content).await {
-                    telemetry!(warn, "Warning: Failed to save patched config {:?} - {}", file_path.file_name().unwrap(), e);
+                    telemetry!(warn, "Warning: Failed to save patched config {:?} - {}", display_name, e);
                 } else {
-                    telemetry!(info, "Patched boot config: {:?}", file_path.file_name().unwrap());
+                    telemetry!(info, "Patched boot config: {:?}", display_name);
                     patched_count += 1;
                 }
             }

@@ -3,7 +3,7 @@ use crate::domain::errors::DiskError;
 use crate::infrastructure::windows::wmi::{BitLockerState, EncryptableVolume};
 use wmi::{AuthLevel, Variant, WMIConnection};
 use crate::application::spawn_blocking_with_context;
-use crate::infrastructure::assets::COMMAND_NO_WINDOW;
+use crate::infrastructure::CommandExt;
 use crate::telemetry;
 
 pub struct BitLocker;
@@ -67,7 +67,7 @@ impl BitLocker {
         let letter = drive_letter.trim_end_matches('\\');
         let mut child = tokio::process::Command::new("bdeunlock.exe")
             .kill_on_drop(true)
-            .creation_flags(COMMAND_NO_WINDOW)
+            .no_window()
             .arg(letter)
             .spawn()
             .map_err(DiskError::OsError)?;
@@ -86,7 +86,7 @@ impl BitLocker {
         let letter = drive_letter.trim_end_matches('\\');
         let output = tokio::process::Command::new("manage-bde.exe")
             .kill_on_drop(true)
-            .creation_flags(COMMAND_NO_WINDOW)
+            .no_window()
             .args(["-protectors", "-disable", letter, "-RebootCount", "1"])
             .output()
             .await

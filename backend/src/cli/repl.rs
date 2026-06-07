@@ -331,7 +331,7 @@ impl CliREPL {
                     return Err(DiskError::DriveEncrypted("BitLocker must be disabled or suspended to continue".into()));
                 }
 
-                let drive_letter = target_part.drive_letter.as_deref().unwrap();
+                let drive_letter = target_part.drive_letter.as_deref().ok_or_else(|| DiskError::DataValidation("Missing drive letter for BitLocker".into()))?;
                 if bitlocker_state == BitLockerState::Locked {
                     BitLocker::prompt_unlock(drive_letter).await?;
                     BitLocker::suspend(drive_letter).await?;
@@ -379,7 +379,7 @@ impl CliREPL {
 
                 let boot_strategy = BootManager::get_strategy(is_uefi);
                 let target_bcd_drive = if is_uefi {
-                    fat32_letter_opt.as_deref().unwrap()
+                    fat32_letter_opt.as_deref().ok_or_else(|| DiskError::DataValidation("Missing FAT32 EFI partition letter".into()))?
                 } else {
                     target_part.drive_letter.as_deref().unwrap_or("C:")
                 };

@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 use tokio::process::Command;
 use crate::application::spawn_blocking_with_context;
 use crate::domain::errors::DiskError;
-use crate::infrastructure::assets::COMMAND_NO_WINDOW;
+use crate::infrastructure::CommandExt;
 use crate::telemetry;
 
 pub struct IsoManager;
@@ -19,7 +19,7 @@ impl IsoManager {
 
         let output = Command::new("powershell.exe")
             .kill_on_drop(true)
-            .creation_flags(COMMAND_NO_WINDOW)
+            .no_window()
             .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
             .output()
             .await
@@ -39,7 +39,7 @@ impl IsoManager {
             let dismount_script = format!("Dismount-DiskImage -ImagePath '{}' -ErrorAction SilentlyContinue", iso_path);
             let _ = Command::new("powershell.exe")
                 .kill_on_drop(true)
-                .creation_flags(COMMAND_NO_WINDOW)
+                .no_window()
                 .args(["-NoProfile", "-NonInteractive", "-Command", &dismount_script])
                 .output()
                 .await;
@@ -58,7 +58,7 @@ impl IsoManager {
 
         let _ = Command::new("powershell.exe")
             .kill_on_drop(true)
-            .creation_flags(COMMAND_NO_WINDOW)
+            .no_window()
             .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
             .output()
             .await;

@@ -9,7 +9,7 @@ use crate::infrastructure::windows::wmi::{MsftDisk, MsftPartition, MsftPhysicalD
 use crate::infrastructure::windows::utils::PartitionUtils;
 use wmi::WMIConnection;
 use crate::application::spawn_blocking_with_context;
-use crate::infrastructure::assets::COMMAND_NO_WINDOW;
+use crate::infrastructure::CommandExt;
 use crate::telemetry;
 
 pub struct WindowsDiskManager {
@@ -315,7 +315,7 @@ impl DiskManager for WindowsDiskManager {
 
         let output_fut = tokio::process::Command::new("powershell.exe")
             .kill_on_drop(true)
-            .creation_flags(COMMAND_NO_WINDOW)
+            .no_window()
             .args(["-NoProfile", "-NonInteractive", "-Command", &cmd_str])
             .output();
 

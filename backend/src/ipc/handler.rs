@@ -15,7 +15,7 @@ pub async fn process_request(
 ) {
     let response = match req.payload {
         IpcProtocol::GetState => {
-            let current_state = state.read().unwrap().clone();
+            let current_state = state.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
 
             IpcResponse {
                 id: req.id.clone(),
