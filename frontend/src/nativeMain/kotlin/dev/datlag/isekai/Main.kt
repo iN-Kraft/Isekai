@@ -22,6 +22,12 @@ import org.kodein.di.DI
 import org.kodein.di.compose.LocalDI
 
 fun main(args: Array<String>) {
+    val isSafeMode = args.contains("--safe-mode") || args.contains("--software-render")
+    if (isSafeMode) {
+        println("Safe mode detected: Forcing Cairo software rendering.")
+        GLib.setenv("GSK_RENDERER", "cairo", true)
+    }
+
     val di = DI {
         import(AppModule.di)
     }
