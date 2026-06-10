@@ -25,6 +25,7 @@ tracing-subscriber = { version = "0.3.23", features = [ "fmt", "ansi", "env-filt
 windows-sys = { version = "0.61.2", features = ["Win32_System_Com", "Win32_System_SystemInformation", "Win32_System_Console"] }
 windows-registry = "0.6.1"
 sha2 = "0.11.0"
+directories = "6.0.0"
 
 [profile.dev]
 strip = "debuginfo"

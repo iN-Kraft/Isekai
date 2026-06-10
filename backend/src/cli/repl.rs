@@ -365,8 +365,14 @@ impl CliREPL {
                 }
             }
 
-            let target_drive_clean = target_part.drive_letter.as_deref().unwrap_or("C:").trim_end_matches('\\');
-            let bcd_backup_path = format!("{}\\bcd_backup_isekai", target_drive_clean);
+            let bcd_backup_path = if let Some(proj_dirs) = directories::ProjectDirs::from("dev", "iNKraft", "Isekai") {
+                let data_dir = proj_dirs.data_local_dir();
+
+                tokio::fs::create_dir_all(data_dir).await.map_err(DiskError::OsError)?;
+                data_dir.join("bcd_backup.export").to_string_lossy().to_string()
+            } else {
+                std::env::temp_dir().join("isekai_bcd_backup.export").to_string_lossy().to_string()
+            };
 
             telemetry!(info, "Creating Windows BCD backup at {}...", bcd_backup_path);
             let bcd_export = Command::new("bcdedit.exe")
