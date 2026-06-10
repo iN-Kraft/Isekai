@@ -6,6 +6,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import dev.datlag.isekai.Symbols
 import dev.datlag.isekai.ipc.ConnectionState
+import dev.datlag.isekai.module.DaemonLauncher
 import dev.datlag.isekai.viewmodel.ConnectionViewModel
 import dev.datlag.isekai.viewmodel.kodeinViewModel
 import dev.datlag.kommons.adwaita.compose.component.StatusPage
@@ -24,7 +25,9 @@ fun ConnectionScreen(
     val connectionState by viewModel.connectionState.collectAsState()
 
     LaunchedEffect(Unit) {
-        viewModel.connect()
+        if (DaemonLauncher.startBackend()) {
+            viewModel.connect()
+        }
     }
 
     LaunchedEffect(connectionState) {
@@ -48,7 +51,7 @@ fun ConnectionScreen(
             is ConnectionState.Error -> "Connection Error"
         },
         description = if (connectionState is ConnectionState.Error) {
-            (connectionState as ConnectionState.Error).message
+            (connectionState as ConnectionState.Error).error.toString()
         } else {
             null
         }

@@ -1,6 +1,6 @@
 package dev.datlag.isekai.module
 
-import dev.datlag.isekai.ipc.IpcTransport
+import dev.datlag.isekai.ipc.IPCTransport
 import dev.datlag.isekai.repository.DiskRepository
 import dev.datlag.isekai.repository.SystemRepository
 import dev.datlag.isekai.viewmodel.ConnectionViewModel
@@ -16,8 +16,8 @@ object AppModule {
 
     private const val NAME = "AppModule"
     val di: DI.Module = DI.Module(NAME) {
-        bindSingleton<IpcTransport> {
-            IpcTransport()
+        bindSingleton<IPCTransport> {
+            IPCTransport()
         }
         
         bindSingleton { SystemRepository(instance()) }

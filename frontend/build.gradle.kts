@@ -35,14 +35,16 @@ fun getGlibLibs(pkgConfigCmd: String, sysroot: String?) = providers.exec {
 }
 
 kotlin {
-    linuxX64 {
+    compilerOptions.freeCompilerArgs.add("-opt-in=kotlinx.cinterop.ExperimentalForeignApi")
+
+    /*linuxX64 {
         binaries {
             executable {
                 entryPoint = "dev.datlag.isekai.main"
                 linkerOpts(getGlibLibs("pkg-config", null).get())
             }
         }
-    }
+    }*/
     // Kodein Compose does not support linuxArm64 right now
     /*linuxArm64 {
         binaries {
@@ -85,10 +87,14 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(libs.adwaita.compose)
+            implementation(libs.arrow)
             implementation(libs.coroutines)
             implementation(libs.ktor)
             implementation(libs.serialization.json)
             implementation(libs.kodein.compose.runtime)
+        }
+        all {
+            languageSettings.enableLanguageFeature("ContextParameters")
         }
     }
 }

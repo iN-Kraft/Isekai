@@ -1,7 +1,9 @@
 package dev.datlag.isekai.viewmodel
 
+import arrow.core.raise.fold
 import dev.datlag.isekai.ipc.ConnectionState
-import dev.datlag.isekai.ipc.IpcTransport
+import dev.datlag.isekai.ipc.IPCError
+import dev.datlag.isekai.ipc.IPCTransport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -16,13 +18,24 @@ class ConnectionViewModel(
     viewModelScope: CoroutineScope
 ) : KodeinViewModel(directDI, viewModelScope) {
 
-    private val transport: IpcTransport = instance()
+    private val transport: IPCTransport = instance()
 
     val connectionState: StateFlow<ConnectionState> = transport.connectionState
 
     fun connect() {
         viewModelScope.launch {
-            transport.connect()
+            fold(
+                block = { transport.connect() },
+                catch = { e ->
+                    println("Unexpected crash during connection: ${e.message}")
+                },
+                recover = { err: IPCError ->
+                    println("Could not establish IPC connection: $err")
+                },
+                transform = {
+                    println("Successfully connected to Isekai Daemon!")
+                }
+            )
         }
     }
 

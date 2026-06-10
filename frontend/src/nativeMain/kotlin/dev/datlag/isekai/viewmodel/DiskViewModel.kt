@@ -1,10 +1,13 @@
 package dev.datlag.isekai.viewmodel
 
+import arrow.core.raise.fold
 import dev.datlag.isekai.ipc.Disk
+import dev.datlag.isekai.ipc.IPCError
 import dev.datlag.isekai.repository.DiskRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.kodein.di.DI
 import org.kodein.di.DirectDI
@@ -28,17 +31,24 @@ class DiskViewModel(
 
     fun loadDisks() {
         viewModelScope.launch {
-            _isLoading.value = true
-            _error.value = null
-            repository.getDisks()
-                .onSuccess { 
-                    _disks.value = it 
-                    _isLoading.value = false
+            _isLoading.update { true }
+            _error.update { null }
+
+            fold(
+                block = { repository.getDisks() },
+                catch = { e ->
+                    _error.update { e.message ?: "An unexpected error occurred" }
+                    _isLoading.update { false }
+                },
+                recover = { err: IPCError ->
+                    _error.update { "Failed to load disks: $err" }
+                    _isLoading.update { false }
+                },
+                transform = { loadedDisks ->
+                    _disks.update { loadedDisks }
+                    _isLoading.update { false }
                 }
-                .onFailure { 
-                    _error.value = it.message ?: "Failed to load disks"
-                    _isLoading.value = false
-                }
+            )
         }
     }
 }
