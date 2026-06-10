@@ -369,9 +369,9 @@ impl CliREPL {
                 let data_dir = proj_dirs.data_local_dir();
 
                 tokio::fs::create_dir_all(data_dir).await.map_err(DiskError::OsError)?;
-                data_dir.join("bcd_backup.export").to_string_lossy().to_string()
+                data_dir.join("bcd.bak").to_string_lossy().to_string()
             } else {
-                std::env::temp_dir().join("isekai_bcd_backup.export").to_string_lossy().to_string()
+                std::env::temp_dir().join("isekai_bcd.bak").to_string_lossy().to_string()
             };
 
             telemetry!(info, "Creating Windows BCD backup at {}...", bcd_backup_path);
@@ -437,7 +437,7 @@ impl CliREPL {
                 boot_strategy.inject_boot_binaries(target_bcd_drive, fat32_letter_opt.as_deref()).await?;
 
                 telemetry!(info, "Patching Windows BCD...");
-                boot_strategy.patch_windows_bcd("Project Isekai Live", target_bcd_drive).await?;
+                boot_strategy.patch_windows_bcd("Project Isekai", target_bcd_drive).await?;
 
                 telemetry!(info, "Writing native boot configurations...");
                 boot_strategy.write_boot_config(&ntfs_letter).await?;

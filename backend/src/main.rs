@@ -2,6 +2,7 @@ use std::sync::Arc;
 use domain::traits::DiskManager;
 use infrastructure::NativeDiskManager;
 use crate::ipc::server::IpcServer;
+use crate::ipc::server::PIPE_NAME;
 
 pub mod cli;
 pub mod domain;
@@ -51,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         repl.start().await?;
     } else {
         tracing::info!("Project Isekai Daemon starting...");
-        let ipc_server = IpcServer::new(disk_manager, 45454);
+        let ipc_server = IpcServer::new(disk_manager, PIPE_NAME);
         ipc_server.start().await?;
     }
 
