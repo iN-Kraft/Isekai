@@ -1,4 +1,5 @@
-use crate::infrastructure::NativeDiskManager;
+use tokio::process::Command;
+use crate::infrastructure::{CommandExt, NativeDiskManager};
 use crate::infrastructure::windows::diskpart::run_diskpart_script;
 use crate::telemetry;
 
@@ -51,7 +52,27 @@ impl SagaOrchestrator {
                     }
                 }
                 Compensation::RestoreBcdBackup { backup_path } => {
+                    telemetry!(info, "Saga Step: Restoring Windows BCD from backup...");
+                    let output = Command::new("bcdedit.exe")
+                        .kill_on_drop(true)
+                        .no_window()
+                        .args(["/import", &backup_path])
+                        .output()
+                        .await;
 
+                    match output {
+                        Ok(out) if !out.status.success() => {
+                            let stderr = String::from_utf8_lossy(&out.stderr);
+                            telemetry!(error, "Failed to restore BCD backup: {}", stderr);
+                        }
+                        Err(e) => {
+                            telemetry!(error, "Failed to execute bcdedit for restore: {}", e);
+                        },
+                        _ => {
+                            telemetry!(info, "Windows BCD restored successfully.");
+                            let _ = tokio::fs::remove_file(&backup_path).await;
+                        }
+                    }
                 }
             }
         }

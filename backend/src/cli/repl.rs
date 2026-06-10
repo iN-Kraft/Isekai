@@ -12,10 +12,8 @@ use crate::domain::errors::DiskError;
 use crate::application::{spawn_blocking_with_context, AppContext, APP_CONTEXT};
 use crate::application::state::{AppState, SharedState, WorkflowGuard, WorkflowType};
 use std::sync::RwLock;
-use crate::infrastructure::{
-    NativeDiskManager,
-    NativeValidator
-};
+use tokio::process::Command;
+use crate::infrastructure::{CommandExt, NativeDiskManager, NativeValidator};
 
 use crate::cli::commands::{Commands, IsekaiCli};
 use crate::cli::helper::IsekaiHelper;
@@ -367,7 +365,28 @@ impl CliREPL {
                 }
             }
 
+            let target_drive_clean = target_part.drive_letter.as_deref().unwrap_or("C:").trim_end_matches('\\');
+            let bcd_backup_path = format!("{}\\bcd_backup_isekai", target_drive_clean);
+
+            telemetry!(info, "Creating Windows BCD backup at {}...", bcd_backup_path);
+            let bcd_export = Command::new("bcdedit.exe")
+                .kill_on_drop(true)
+                .no_window()
+                .args(["/export", &bcd_backup_path])
+                .output()
+                .await
+                .map_err(DiskError::OsError)?;
+
+            if !bcd_export.status.success() {
+                let err_msg = String::from_utf8_lossy(&bcd_export.stderr);
+                return Err(DiskError::OsError(Error::new(
+                    ErrorKind::Other,
+                    format!("Failed to backup Windows BCD. Refusing to proceed. Error: {}", err_msg)
+                )));
+            }
+
             let mut saga = SagaOrchestrator::new();
+            saga.push(Compensation::RestoreBcdBackup { backup_path: bcd_backup_path.clone() });
 
             let destructive_phase = async {
                 telemetry!(info, "Shrinking NTFS partition {} to {} bytes...", partition_id, target_size_bytes);
@@ -437,6 +456,9 @@ impl CliREPL {
                     )));
                 }
             }
+
+            telemetry!(info, "Cleaning up temporary backup files...");
+            let _ = tokio::fs::remove_file(&bcd_backup_path).await;
 
             Ok(())
         }.await;
