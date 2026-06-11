@@ -3,6 +3,7 @@ use crate::domain::traits::DiskManager;
 use std::error::Error;
 use std::ffi::c_void;
 use std::ptr::null_mut;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use futures::{SinkExt, StreamExt};
 use tokio::net::TcpListener;
 use tokio::net::windows::named_pipe::{ServerOptions, NamedPipeServer};
@@ -24,7 +25,9 @@ pub(crate) const PIPE_NAME: &str = r"\\.\pipe\isekai_daemon";
 pub struct IpcServer {
     disk_manager: Arc<dyn DiskManager>,
     pipe_name: String,
-    state: SharedState
+    state: SharedState,
+    connected_clients: Arc<AtomicUsize>,
+    active_tasks: Arc<AtomicUsize>
 }
 
 impl IpcServer {
@@ -33,6 +36,16 @@ impl IpcServer {
             disk_manager,
             pipe_name: pipe_name.into(),
             state: Arc::new(RwLock::new(AppState::default()))
+        }
+    }
+
+    fn evaluate_shutdown(clients: &Arc<AtomicUsize>, tasks: &Arc<AtomicUsize>) {
+        let client_count = clients.load(Ordering::SeqCst);
+        let task_count = tasks.load(Ordering::SeqCst);
+
+        if client_count <= 0 && task_count <= 0 {
+            println!("Zero clients and zero active tasks. Safely terminating daemon.");
+            std::process::exit(0);
         }
     }
 
@@ -76,6 +89,7 @@ impl IpcServer {
 
         loop {
             server.connect().await?;
+            self.connected_clients.fetch_add(1, Ordering::SeqCst);
             println!("Client successfully connected via Named Pipe.");
 
             let client_pipe = server;
@@ -84,6 +98,8 @@ impl IpcServer {
             let dm = self.disk_manager.clone();
             let state = self.state.clone();
 
+            let clients_tracker = self.connected_clients.clone();
+            let tasks_tracker = self.active_tasks.clone();
 
             spawn(async move {
                 let framed  = Framed::new(client_pipe, LengthDelimitedCodec::new());
@@ -105,15 +121,22 @@ impl IpcServer {
                         Ok(bytes_mut) => {
                             if let Ok(line) = String::from_utf8(bytes_mut.to_vec()) {
                                 if let Ok(req) = serde_json::from_str::<IpcRequest>(&line) {
+                                    tasks_tracker.fetch_add(1, Ordering::SeqCst);
+
                                     let tx_clone = tx.clone();
                                     let dm_clone = dm.clone();
                                     let state_clone = state.clone();
+                                    let task_tracker_clone = tasks_tracker.clone();
+                                    let client_tracker_clone = clients_tracker.clone();
 
                                     spawn(async move {
                                         let ctx = AppContext::IPC(tx_clone.clone(), state_clone.clone());
 
                                         APP_CONTEXT.scope(ctx, async move {
                                             process_request(req, dm_clone, tx_clone, state_clone).await;
+
+                                            task_tracker_clone.fetch_sub(1, Ordering::SeqCst);
+                                            Self::evaluate_shutdown(&client_tracker_clone, &task_tracker_clone);
                                         }).await;
                                     });
                                 } else {
@@ -131,7 +154,9 @@ impl IpcServer {
                 }
 
                 writer_task.abort();
+                clients_tracker.fetch_sub(1, Ordering::SeqCst);
                 println!("Client disconnected from Named Pipe.");
+                Self::evaluate_shutdown(&clients_tracker, &tasks_tracker);
             });
         }
     }
