@@ -9,6 +9,7 @@ import arrow.core.raise.context.raise
 import arrow.core.raise.either
 import arrow.core.raise.ensure
 import arrow.core.raise.ensureNotNull
+import dev.datlag.isekai.module.DaemonLauncher
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.memScoped
@@ -36,6 +37,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import platform.windows.CloseHandle
+import platform.windows.CreateEventW
 import platform.windows.CreateFileW
 import platform.windows.DWORDVar
 import platform.windows.FILE_FLAG_WRITE_THROUGH
@@ -43,9 +45,11 @@ import platform.windows.GENERIC_READ
 import platform.windows.GENERIC_WRITE
 import platform.windows.GetLastError
 import platform.windows.HANDLE
+import platform.windows.INFINITE
 import platform.windows.INVALID_HANDLE_VALUE
 import platform.windows.OPEN_EXISTING
 import platform.windows.ReadFile
+import platform.windows.WaitForSingleObject
 import platform.windows.WriteFile
 
 class IPCTransport(
@@ -75,8 +79,7 @@ class IPCTransport(
     private val pendingRequestsMutex = Mutex()
     private val pendingRequests = mutableMapOf<String, CompletableDeferred<Either<IPCError, OutgoingMessage.Response>>>()
 
-    context(_: Raise<IPCError>)
-    suspend fun connect() {
+    fun connect() {
         val currentState = _connectionState.value
         if(currentState is ConnectionState.Connected || currentState is ConnectionState.Connecting) {
             return
@@ -84,29 +87,68 @@ class IPCTransport(
 
         _connectionState.update { ConnectionState.Connecting }
 
-        val handle = withContext(Dispatchers.IO) {
-            CreateFileW(
-                lpFileName = pipeName,
-                dwDesiredAccess = (GENERIC_READ or GENERIC_WRITE.toUInt()),
-                dwShareMode = 0u,
-                lpSecurityAttributes = null,
-                dwCreationDisposition = OPEN_EXISTING.toUInt(),
-                dwFlagsAndAttributes = FILE_FLAG_WRITE_THROUGH,
-                hTemplateFile = null
-            )
+        transportScope.launch {
+            val hEvent = withContext(Dispatchers.IO) {
+                CreateEventW(
+                    lpEventAttributes = null,
+                    bManualReset = 1,
+                    bInitialState = 0,
+                    lpName = "Local\\IsekaiDaemonReady"
+                )
+            }
+
+            if (hEvent == null || hEvent == INVALID_HANDLE_VALUE) {
+                _connectionState.update { ConnectionState.Error(IPCError.ConnectionFailed("Failed to create sync event.", GetLastError())) }
+                return@launch
+            }
+
+            try {
+                val launchSuccess = DaemonLauncher.startBackend()
+                if (!launchSuccess) {
+                    _connectionState.update { ConnectionState.Error(IPCError.ConnectionFailed("Failed to start daemon process.")) }
+                    return@launch
+                }
+
+                withContext(Dispatchers.IO) {
+                    WaitForSingleObject(hEvent, INFINITE)
+                }
+
+                val handle = withContext(Dispatchers.IO) {
+                    CreateFileW(
+                        lpFileName = pipeName,
+                        dwDesiredAccess = (GENERIC_READ or GENERIC_WRITE.toUInt()),
+                        dwShareMode = 0u,
+                        lpSecurityAttributes = null,
+                        dwCreationDisposition = OPEN_EXISTING.toUInt(),
+                        dwFlagsAndAttributes = FILE_FLAG_WRITE_THROUGH,
+                        hTemplateFile = null
+                    )
+                }
+
+                if (handle == INVALID_HANDLE_VALUE) {
+                    _connectionState.update {
+                        ConnectionState.Error(
+                            IPCError.ConnectionFailed(
+                                "Pipe was signaled but failed to open.",
+                                GetLastError()
+                            )
+                        )
+                    }
+                    return@launch
+                }
+
+                pipeHandle = handle as HANDLE
+                _connectionState.update { ConnectionState.Connected }
+
+                readJob = launch { readLoop(handle) }
+            } catch (e: Throwable) {
+                _connectionState.update {
+                    ConnectionState.Error(IPCError.ConnectionFailed("Crash during connection: ${e.message}", null))
+                }
+            } finally {
+                CloseHandle(hEvent)
+            }
         }
-
-        if (handle == INVALID_HANDLE_VALUE) {
-            val errCode = GetLastError()
-            val error = IPCError.ConnectionFailed("Failed to open Named Pipe at $pipeName", errCode)
-            _connectionState.update { ConnectionState.Error(error) }
-            raise(error)
-        }
-
-        pipeHandle = handle as HANDLE
-        _connectionState.update { ConnectionState.Connected }
-
-        readJob = transportScope.launch { readLoop(handle) }
     }
 
     private suspend fun readLoop(handle: HANDLE) {

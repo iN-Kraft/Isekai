@@ -25,9 +25,7 @@ fun ConnectionScreen(
     val connectionState by viewModel.connectionState.collectAsState()
 
     LaunchedEffect(Unit) {
-        if (DaemonLauncher.startBackend()) {
-            viewModel.connect()
-        }
+        viewModel.connect()
     }
 
     LaunchedEffect(connectionState) {

@@ -22,7 +22,16 @@ regex = "1.12.3"
 embed-resource = "3.0.9"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = [ "fmt", "ansi", "env-filter" ] }
-windows-sys = { version = "0.61.2", features = ["Win32_System_Com", "Win32_System_SystemInformation", "Win32_System_Console"] }
+windows-sys = { version = "0.61.2", features = [
+    "Win32_System_Com",
+    "Win32_System_SystemInformation",
+    "Win32_System_Console",
+    "Win32_System_Threading",
+    "Win32_Foundation",
+    "Win32_Security_Authorization",
+    "Win32_Security",
+    "Win32_System_Memory"
+] }
 windows-registry = "0.6.1"
 sha2 = "0.11.0"
 directories = "6.0.0"

@@ -23,20 +23,7 @@ class ConnectionViewModel(
     val connectionState: StateFlow<ConnectionState> = transport.connectionState
 
     fun connect() {
-        viewModelScope.launch {
-            fold(
-                block = { transport.connect() },
-                catch = { e ->
-                    println("Unexpected crash during connection: ${e.message}")
-                },
-                recover = { err: IPCError ->
-                    println("Could not establish IPC connection: $err")
-                },
-                transform = {
-                    println("Successfully connected to Isekai Daemon!")
-                }
-            )
-        }
+        transport.connect()
     }
 
     fun disconnect() {
