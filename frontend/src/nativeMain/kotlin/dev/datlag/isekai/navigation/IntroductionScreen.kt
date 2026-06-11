@@ -31,12 +31,6 @@ fun IntroductionScreen(
         connectionViewModel.connect()
     }
 
-    LaunchedEffect(connectionState) {
-        if (connectionState is ConnectionState.Connected) {
-            systemViewModel.checkSystem()
-        }
-    }
-
     Column(
         modifier = Modifier.fillMaxSize(),
     ) {

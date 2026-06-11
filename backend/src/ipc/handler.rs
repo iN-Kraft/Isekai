@@ -13,6 +13,7 @@ pub async fn process_request(
     tx: Sender<OutgoingMessage>,
     state: SharedState
 ) {
+    telemetry!(info, "Processing Request: {:?}", req);
     let response = match req.payload {
         IpcProtocol::GetState => {
             let current_state = state.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();

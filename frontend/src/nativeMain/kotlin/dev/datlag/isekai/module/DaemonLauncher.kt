@@ -7,10 +7,11 @@ import kotlinx.cinterop.toLong
 import platform.windows.GetModuleFileNameW
 import platform.windows.MAX_PATH
 import platform.windows.SW_HIDE
+import platform.windows.SW_SHOW
 import platform.windows.ShellExecuteW
 import platform.windows.WCHARVar
 
-object DaemonLauncher {
+class DaemonLauncher(val debug: Boolean) {
 
     private val daemonPath: String
         get() {
@@ -39,7 +40,7 @@ object DaemonLauncher {
                 lpFile = daemonPath,
                 lpParameters = null,
                 lpDirectory = null,
-                nShowCmd = SW_HIDE
+                nShowCmd = if (debug) SW_SHOW else SW_HIDE
             )
 
             val instanceHandle = result.toLong()

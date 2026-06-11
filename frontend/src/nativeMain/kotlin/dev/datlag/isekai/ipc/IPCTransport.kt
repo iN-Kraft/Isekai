@@ -25,6 +25,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -48,12 +49,14 @@ import platform.windows.HANDLE
 import platform.windows.INFINITE
 import platform.windows.INVALID_HANDLE_VALUE
 import platform.windows.OPEN_EXISTING
+import platform.windows.PeekNamedPipe
 import platform.windows.ReadFile
 import platform.windows.WaitForSingleObject
 import platform.windows.WriteFile
 
 class IPCTransport(
-    private val pipeName: String = "\\\\.\\pipe\\isekai_daemon"
+    private val pipeName: String = "\\\\.\\pipe\\isekai_daemon",
+    private val daemonLauncher: DaemonLauncher
 ) : AutoCloseable {
 
     private val json = Json {
@@ -103,7 +106,7 @@ class IPCTransport(
             }
 
             try {
-                val launchSuccess = DaemonLauncher.startBackend()
+                val launchSuccess = daemonLauncher.startBackend()
                 if (!launchSuccess) {
                     _connectionState.update { ConnectionState.Error(IPCError.ConnectionFailed("Failed to start daemon process.")) }
                     return@launch
@@ -151,57 +154,132 @@ class IPCTransport(
         }
     }
 
+    private suspend fun readExact(handle: HANDLE, buffer: ByteArray): Boolean {
+        var totalRead = 0
+        val bytesToRead = buffer.size
+
+        memScoped {
+            val bytesRead = alloc<DWORDVar>()
+
+            while (totalRead < bytesToRead) {
+                val success = buffer.usePinned { pinned ->
+                    ReadFile(
+                        hFile = handle,
+                        lpBuffer = pinned.addressOf(totalRead),
+                        nNumberOfBytesToRead = (bytesToRead - totalRead).toUInt(),
+                        lpNumberOfBytesRead = bytesRead.ptr,
+                        lpOverlapped = null
+                    )
+                }
+
+                if (success == 0 || bytesRead.value == 0u) {
+                    return false
+                }
+
+                totalRead += bytesRead.value.toInt()
+            }
+        }
+
+        return true
+    }
+
+    private suspend fun writeExact(handle: HANDLE, buffer: ByteArray): Boolean {
+        var totalWritten = 0
+        val bytesToWrite = buffer.size
+
+        memScoped {
+            val bytesWritten = alloc<DWORDVar>()
+
+            while (totalWritten < bytesToWrite) {
+                val success = buffer.usePinned { pinned ->
+                    WriteFile(
+                        hFile = handle,
+                        lpBuffer = pinned.addressOf(totalWritten),
+                        nNumberOfBytesToWrite = (bytesToWrite - totalWritten).toUInt(),
+                        lpNumberOfBytesWritten = bytesWritten.ptr,
+                        lpOverlapped = null
+                    )
+                }
+
+                if (success == 0 || bytesWritten.value == 0u) {
+                    return false
+                }
+
+                totalWritten += bytesWritten.value.toInt()
+            }
+        }
+
+        return true
+    }
+
+    private suspend fun waitForBytes(handle: HANDLE, requiredBytes: UInt): Boolean {
+        while (currentCoroutineContext().isActive) {
+            var bytesAvailable = 0u
+            var peekSuccess = 0
+
+            memScoped {
+                val avail = alloc<DWORDVar>()
+                peekSuccess = PeekNamedPipe(
+                    hNamedPipe = handle,
+                    lpBuffer = null,
+                    nBufferSize = 0u,
+                    lpBytesRead = null,
+                    lpTotalBytesAvail = avail.ptr,
+                    lpBytesLeftThisMessage = null
+                )
+                bytesAvailable = avail.value
+            }
+
+            if (peekSuccess == 0) {
+                return false
+            }
+
+            if (bytesAvailable >= requiredBytes) {
+                return true
+            }
+
+            delay(10)
+        }
+        return false
+    }
+
     private suspend fun readLoop(handle: HANDLE) {
         var terminationError: IPCError? = null
 
         try {
-            memScoped {
-                val bytesRead = alloc<DWORDVar>()
-                val headerBuffer = ByteArray(4)
+            val headerBuffer = ByteArray(4)
 
-                while (currentCoroutineContext().isActive) {
-                    val headerSuccess = headerBuffer.usePinned { pinnedHeader ->
-                        ReadFile(
-                            hFile = handle,
-                            lpBuffer = pinnedHeader.addressOf(0),
-                            nNumberOfBytesToRead = 4u,
-                            lpNumberOfBytesRead = bytesRead.ptr,
-                            lpOverlapped = null
-                        )
-                    }
-
-                    if (headerSuccess == 0 || bytesRead.value == 0u) {
-                        terminationError = IPCError.Disconnected("Pipe stream ended or handle closed.")
-                        break
-                    }
-
-                    val payloadLength = ((headerBuffer[0].toInt() and 0xFF) shl 24) or
-                            ((headerBuffer[1].toInt() and 0xFF) shl 16) or
-                            ((headerBuffer[2].toInt() and 0xFF) shl 8) or
-                            (headerBuffer[3].toInt() and 0xFF)
-
-                    if (payloadLength <= 0) {
-                        continue
-                    }
-
-                    val payloadBuffer = ByteArray(payloadLength)
-                    val payloadSuccess = payloadBuffer.usePinned { pinnedPayload ->
-                        ReadFile(
-                            hFile = handle,
-                            lpBuffer = pinnedPayload.addressOf(0),
-                            nNumberOfBytesToRead = payloadLength.toUInt(),
-                            lpNumberOfBytesRead = bytesRead.ptr,
-                            lpOverlapped = null
-                        )
-                    }
-
-                    if (payloadSuccess == 0 || bytesRead.value == 0u) {
-                        terminationError = IPCError.Disconnected("Pipe stream fragmented.")
-                        break
-                    }
-
-                    handleIncomingFrame(payloadBuffer.decodeToString())
+            while (currentCoroutineContext().isActive) {
+                if (!waitForBytes(handle, headerBuffer.size.toUInt())) {
+                    terminationError = IPCError.Disconnected("Pipe stream ended or closed.")
+                    break
                 }
+
+                if (!readExact(handle, headerBuffer)) {
+                    terminationError = IPCError.Disconnected("Pipe stream ended or header read failed.")
+                    break
+                }
+
+                val payloadLength = ((headerBuffer[0].toInt() and 0xFF) shl 24) or
+                        ((headerBuffer[1].toInt() and 0xFF) shl 16) or
+                        ((headerBuffer[2].toInt() and 0xFF) shl 8) or
+                        (headerBuffer[3].toInt() and 0xFF)
+
+                if (payloadLength <= 0) {
+                    continue
+                }
+
+                if (!waitForBytes(handle, payloadLength.toUInt())) {
+                    terminationError = IPCError.Disconnected("Pipe stream ended during payload.")
+                }
+
+                val payloadBuffer = ByteArray(payloadLength)
+                if (!readExact(handle, payloadBuffer)) {
+                    terminationError = IPCError.Disconnected("Pipe stream ended during payload read.")
+                    break
+                }
+
+                handleIncomingFrame(payloadBuffer.decodeToString())
             }
         } finally {
             val finalState = terminationError?.let { ConnectionState.Error(it) } ?: ConnectionState.Disconnected
@@ -213,15 +291,19 @@ class IPCTransport(
     private suspend fun handleIncomingFrame(jsonLine: String) {
         try {
             when (val msg = json.decodeFromString<OutgoingMessage>(jsonLine)) {
-                is OutgoingMessage.Event -> _events.emit(msg)
+                is OutgoingMessage.Event -> {
+                    println("[EVENT] $msg")
+                    _events.emit(msg)
+                }
                 is OutgoingMessage.Response -> {
                     pendingRequestsMutex.withLock {
                         pendingRequests.remove(msg.id)
-                    }?.complete(Either.Right(msg))
+                    }?.complete(Either.Right(msg.also { println("[RESPONSE] $it") }))
                 }
             }
         } catch (e: Throwable) {
             println("Failed to decode IPC frame: $jsonLine. Cause: ${e.message}")
+            cleanup(IPCError.SerializationError("Failed to parse backend response: ${e.message}"))
         }
     }
 
@@ -250,22 +332,12 @@ class IPCTransport(
 
             val totalBuffer = headerBytes + payloadBytes
 
-            memScoped {
-                val bytesWritten = alloc<DWORDVar>()
+            println("[SEND] ${totalBuffer.size} Bytes")
+            val success = writeExact(handle, totalBuffer)
 
-                totalBuffer.usePinned { pinned ->
-                    val success = WriteFile(
-                        hFile = handle,
-                        lpBuffer = pinned.addressOf(0),
-                        nNumberOfBytesToWrite = totalBuffer.size.toUInt(),
-                        lpNumberOfBytesWritten = bytesWritten.ptr,
-                        lpOverlapped = null
-                    )
-
-                    if (success == 0) {
-                        throw IllegalStateException("Write failed. Win32 Code: ${GetLastError()}")
-                    }
-                }
+            if (!success) {
+                println("[SEND] Failed")
+                throw IllegalStateException("Write failed. Win32 Code: ${GetLastError()}")
             }
         }.mapLeft {
             IPCError.ConnectionFailed("Failed to send request frame", null)
@@ -287,6 +359,7 @@ class IPCTransport(
 
             response
         } catch (e: CancellationException) {
+            println("[SEND] Cancelled")
             pendingRequestsMutex.withLock {
                 pendingRequests.remove(request.id)
             }

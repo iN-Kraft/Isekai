@@ -17,7 +17,7 @@ object AppModule {
     private const val NAME = "AppModule"
     val di: DI.Module = DI.Module(NAME) {
         bindSingleton<IPCTransport> {
-            IPCTransport()
+            IPCTransport(daemonLauncher = instance())
         }
         
         bindSingleton { SystemRepository(instance()) }

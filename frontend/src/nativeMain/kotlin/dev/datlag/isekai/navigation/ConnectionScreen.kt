@@ -6,7 +6,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import dev.datlag.isekai.Symbols
 import dev.datlag.isekai.ipc.ConnectionState
-import dev.datlag.isekai.module.DaemonLauncher
 import dev.datlag.isekai.viewmodel.ConnectionViewModel
 import dev.datlag.isekai.viewmodel.kodeinViewModel
 import dev.datlag.kommons.adwaita.compose.component.StatusPage

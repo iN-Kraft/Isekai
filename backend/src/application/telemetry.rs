@@ -18,6 +18,7 @@ macro_rules! telemetry {
                 tracing::info!("=== STARTING WORKFLOW: {:?} ===", $workflow);
             }
             $crate::application::AppContext::IPC(tx, _) => {
+                tracing::info!("=== STARTING WORKFLOW: {:?} ===", $workflow);
                 let event = $crate::ipc::protocol::IpcEvent {
                     event_type: "start".to_string(),
                     message: "Initializing...".to_string(),
@@ -51,6 +52,7 @@ macro_rules! telemetry {
                 tracing::info!("=== WORKFLOW ENDED ===");
             }
             $crate::application::AppContext::IPC(tx, _) => {
+                tracing::info!("=== WORKFLOW ENDED ===");
                 let event = $crate::ipc::protocol::IpcEvent {
                     event_type: "end".to_string(),
                     message: "Workflow complete.".to_string(),
@@ -81,6 +83,7 @@ macro_rules! telemetry {
                 tracing::info!(">>> Step: {}", $msg);
             }
             $crate::application::AppContext::IPC(tx, _) => {
+                tracing::info!(">>> Step: {}", $msg);
                 let event = $crate::ipc::protocol::IpcEvent {
                     event_type: "step".to_string(),
                     message: $msg.to_string(),
@@ -112,6 +115,7 @@ macro_rules! telemetry {
                 tracing::info!("[{}%] {}", $percent, formatted_msg);
             }
             $crate::application::AppContext::IPC(tx, _) => {
+                tracing::info!("[{}%] {}", $percent, formatted_msg);
                 let event = $crate::ipc::protocol::IpcEvent {
                     event_type: "progress".to_string(),
                     message: formatted_msg,
@@ -143,6 +147,7 @@ macro_rules! telemetry {
                 tracing::$lvl!("{}", formatted_msg);
             }
             $crate::application::AppContext::IPC(tx, _) => {
+                tracing::$lvl!("{}", formatted_msg);
                 let event = $crate::ipc::protocol::IpcEvent {
                     event_type: stringify!($lvl).to_string(),
                     message: formatted_msg,

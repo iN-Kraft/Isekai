@@ -35,7 +35,9 @@ impl IpcServer {
         Self {
             disk_manager,
             pipe_name: pipe_name.into(),
-            state: Arc::new(RwLock::new(AppState::default()))
+            state: Arc::new(RwLock::new(AppState::default())),
+            connected_clients: Arc::new(AtomicUsize::new(0)),
+            active_tasks: Arc::new(AtomicUsize::new(0))
         }
     }
 

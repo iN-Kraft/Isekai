@@ -3,6 +3,7 @@ package dev.datlag.isekai
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import dev.datlag.isekai.module.AppModule
+import dev.datlag.isekai.module.DaemonLauncher
 import dev.datlag.isekai.navigation.ConnectionScreen
 import dev.datlag.isekai.navigation.HomeScreen
 import dev.datlag.isekai.navigation.IntroductionScreen
@@ -19,6 +20,7 @@ import dev.datlag.kommons.gtk.compose.modifier.fillMaxSize
 import dev.datlag.kommons.gtk.compose.modifier.fillMaxWidth
 import dev.datlag.kommons.gtk.glib.GLib
 import org.kodein.di.DI
+import org.kodein.di.bindSingleton
 import org.kodein.di.compose.LocalDI
 
 fun main(args: Array<String>) {
@@ -30,6 +32,10 @@ fun main(args: Array<String>) {
 
     val di = DI {
         import(AppModule.di)
+
+        bindSingleton<DaemonLauncher> {
+            DaemonLauncher(debug = args.contains("--debug"))
+        }
     }
     GLib.setApplicationName("Project Isekai") // Localize later
     GLib.setPrgname("Project Isekai") // Do not localize
