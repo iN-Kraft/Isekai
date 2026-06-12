@@ -1,19 +1,38 @@
 package dev.datlag.isekai.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ComposeNode
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import dev.datlag.isekai.ipc.ConnectionState
+import dev.datlag.isekai.navigation.model.IntroSlide
 import dev.datlag.isekai.viewmodel.ConnectionViewModel
 import dev.datlag.isekai.viewmodel.SystemViewModel
 import dev.datlag.isekai.viewmodel.kodeinViewModel
+import dev.datlag.kommons.adwaita.CarouselIndicatorDots
+import dev.datlag.kommons.adwaita.compose.component.CarouselIndicatorDots
+import dev.datlag.kommons.adwaita.compose.component.CarouselIndicatorDotsNode
+import dev.datlag.kommons.adwaita.compose.component.CarouselState
+import dev.datlag.kommons.adwaita.compose.component.StatusPage
+import dev.datlag.kommons.adwaita.compose.component.rememberCarouselState
+import dev.datlag.kommons.gtk.compose.GtkApplier
+import dev.datlag.kommons.gtk.compose.component.Box
 import dev.datlag.kommons.gtk.compose.component.Button
 import dev.datlag.kommons.gtk.compose.component.Column
+import dev.datlag.kommons.gtk.compose.component.HorizontalDivider
+import dev.datlag.kommons.gtk.compose.component.Row
+import dev.datlag.kommons.gtk.compose.component.SeparatorNode
 import dev.datlag.kommons.gtk.compose.component.Text
 import dev.datlag.kommons.gtk.compose.modifier.Modifier
+import dev.datlag.kommons.gtk.compose.modifier.css
 import dev.datlag.kommons.gtk.compose.modifier.fillMaxSize
+import dev.datlag.kommons.gtk.compose.modifier.fillMaxWidth
 import dev.datlag.kommons.gtk.compose.modifier.padding
+import dev.datlag.kommons.gtk.compose.modifier.size
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 
@@ -27,29 +46,72 @@ fun IntroductionScreen(
     val connectionState by connectionViewModel.connectionState.collectAsState()
     val report by systemViewModel.systemReport.collectAsState()
 
-    LaunchedEffect(connectionViewModel) {
-        connectionViewModel.connect()
+    var currentPage by remember { mutableIntStateOf(0) }
+    val isLastPage = currentPage == IntroSlide.collection.lastIndex
+
+    val onStartAction = {
+        when (connectionState) {
+            is ConnectionState.Connected if report?.isReady == true -> {
+                onNavigateNext(Screen.Home)
+            }
+
+            is ConnectionState.Connected -> {
+                onNavigateNext(Screen.SystemCheck)
+            }
+
+            else -> {
+                onNavigateNext(Screen.Connection)
+            }
+        }
     }
 
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize()
     ) {
-        Text("Welcome to Isekai")
-        Text("Migrate to a new Linux Distribution!")
-        Button(onClick = {
-            when (connectionState) {
-                is ConnectionState.Connected if report?.isReady == true -> {
-                    onNavigateNext(Screen.Home)
-                }
-                is ConnectionState.Connected -> {
-                    onNavigateNext(Screen.SystemCheck)
-                }
-                else -> {
-                    onNavigateNext(Screen.Connection)
-                }
+        Box(
+            modifier = Modifier
+                .weight(1F)
+                .fillMaxWidth(),
+        ) {
+            val slide = remember(currentPage) {
+                IntroSlide.collection[currentPage]
             }
-        }, modifier = Modifier.padding(top = 16)) {
-            Text("Skip & Start")
+
+            StatusPage(
+                modifier = Modifier.fillMaxSize(),
+                icon = slide.icon,
+                title = slide.title,
+                description = slide.description
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth()
+                .padding(24)
+        ) {
+            if (!isLastPage) {
+                Button(
+                    modifier = Modifier.css("pill"),
+                    onClick = {
+                        currentPage = IntroSlide.collection.lastIndex
+                    }
+                ) {
+                    Text(text = "Skip")
+                }
+            } else {
+                Box(modifier = Modifier.size(width = 80)) {}
+            }
+
+            HorizontalDivider(modifier = Modifier.css("spacer").weight(1F))
+
+            Button(
+                modifier = Modifier.css("suggested-action", "pill"),
+                onClick = {
+                    if (isLastPage) onStartAction() else currentPage++
+                }
+            ) {
+                Text(if (isLastPage) "Start" else "Next")
+            }
         }
     }
 }

@@ -1,4 +1,6 @@
+import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinNativeLink
+import org.jetbrains.kotlin.konan.target.KonanTarget
 
 plugins {
     alias(libs.plugins.multiplatform)
@@ -8,6 +10,7 @@ plugins {
 }
 
 val fedoraSysroot = "/opt/aarch64-sysroot"
+val mingwSysroot = file("/usr/x86_64-w64-mingw32/sys-root/mingw")
 fun hasUbuntuCrossCompiler(): Boolean {
     return File("/usr/bin/aarch64-linux-gnu-pkg-config").exists()
 }
@@ -24,6 +27,14 @@ fun getArm64Sysroot(): String? = System.getenv("ARM64_SYSROOT") ?: when {
     hasFedoraSysroot() -> fedoraSysroot
     else -> null
 }
+
+fun getGlibCFlags(pkgConfigCmd: String, sysroot: String?) = providers.exec {
+    if (sysroot != null) {
+        environment("PKG_CONFIG_SYSROOT_DIR", sysroot)
+        environment("PKG_CONFIG_LIBDIR", "$sysroot/usr/lib64/pkgconfig:$sysroot/usr/share/pkgconfig")
+    }
+    commandLine(pkgConfigCmd, "--cflags", "libadwaita-1")
+}.standardOutput.asText
 
 fun getGlibLibs(pkgConfigCmd: String, sysroot: String?) = providers.exec {
     if (sysroot != null) {
@@ -78,13 +89,35 @@ kotlin {
                     "$mingwLibDir/libpangocairo-1.0.dll.a",
                     "$mingwLibDir/libgtk-4.dll.a",
                     "$mingwLibDir/libgraphene-1.0.dll.a",
-                    "$mingwLibDir/libadwaita-1.dll.a"
+                    "$mingwLibDir/libadwaita-1.dll.a",
+                    "$mingwLibDir/libintl.dll.a"
                 )
             }
         }
     }
 
     applyDefaultHierarchyTemplate()
+
+    targets.withType<KotlinNativeTarget> {
+        val (pkgCmd, sysroot) = when (konanTarget) {
+            is KonanTarget.LINUX_ARM64 -> getPkgConfigCmd() to getArm64Sysroot()
+            is KonanTarget.MINGW_X64 -> "x86_64-w64-mingw32-pkg-config" to null
+            else -> "pkg-config" to null
+        }
+
+        compilations.getByName("main") {
+            cinterops {
+                create("intl") {
+                    val flags = getGlibCFlags(pkgCmd, sysroot).get().trim().split("\\s+".toRegex()).toMutableList()
+
+                    if (konanTarget is KonanTarget.MINGW_X64) {
+                        flags.add("-I${mingwSysroot.absolutePath}/include")
+                    }
+                    compilerOpts(flags)
+                }
+            }
+        }
+    }
 
     sourceSets {
         commonMain.dependencies {
@@ -94,6 +127,7 @@ kotlin {
             implementation(libs.ktor)
             implementation(libs.serialization.json)
             implementation(libs.kodein.compose.runtime)
+            implementation(libs.locale)
         }
         all {
             languageSettings.enableLanguageFeature("ContextParameters")
@@ -114,7 +148,6 @@ val buildRustDaemon by tasks.registering(Exec::class) {
     outputs.file(rustReleaseExe)
 }
 
-val mingwSysroot = file("/usr/x86_64-w64-mingw32/sys-root/mingw")
 val bundleGtkDependencies by tasks.registering(Sync::class) {
     group = "isekai"
     description = "Bundles MinGW GTK/Adwaita DLLs and required share assets for offline Windows distribution"
@@ -204,10 +237,30 @@ val bundleGtkDependencies by tasks.registering(Sync::class) {
     }
 }
 
+val compileTranslations by tasks.registering(CompileTranslationTask::class) {
+    group = "isekai"
+    description = "Compiles raw .po files into binary .mo files for gettext"
+
+    mustRunAfter(compileSchemas)
+
+    poDir.set(layout.projectDirectory.dir("src/nativeMain/resources/locale"))
+    intermediateDir.set(layout.buildDirectory.dir("gtk-bundle"))
+}
+
+val compileSchemas by tasks.registering(CompileSchemasTask::class) {
+    group = "isekai"
+    description = "Compiles GLib XML schemas into gschemas.compiled"
+
+    dependsOn(bundleGtkDependencies)
+
+    schemasDir.set(layout.buildDirectory.dir("gtk-bundle/share/glib-2.0/schemas"))
+}
+
 tasks.withType<KotlinNativeLink>().configureEach {
     if (binary.target.name == "mingwX64") {
         dependsOn(buildRustDaemon)
-        dependsOn(bundleGtkDependencies)
+        dependsOn(compileSchemas)
+        dependsOn(compileTranslations)
 
         val sourceExe = rustReleaseExe
         val outputDirProvider = destinationDirectory
@@ -228,6 +281,59 @@ tasks.withType<KotlinNativeLink>().configureEach {
             if (bundleDir.exists()) {
                 bundleDir.copyRecursively(outputDir, overwrite = true)
                 println("Staged GTK Bundle (DLLs and Assets) into: $outputDir")
+            }
+        }
+    }
+}
+
+abstract class CompileSchemasTask : DefaultTask() {
+    @get:Inject
+    abstract val execOperations: ExecOperations
+
+    @get:InputDirectory
+    abstract val schemasDir: DirectoryProperty
+
+    @TaskAction
+    fun compile() {
+        val dir = schemasDir.get().asFile
+
+        if (dir.exists()) {
+            execOperations.exec {
+                commandLine("glib-compile-schemas", dir.absolutePath)
+            }
+        }
+    }
+}
+
+abstract class CompileTranslationTask : DefaultTask() {
+
+    @get:Inject
+    abstract val execOperations: ExecOperations
+
+    @get:InputDirectory
+    abstract val poDir: DirectoryProperty
+
+    @get:OutputDirectory
+    abstract val intermediateDir: DirectoryProperty
+
+    @TaskAction
+    fun compile() {
+        val po = poDir.get().asFile
+        val out = intermediateDir.get().asFile
+
+        if (!po.exists()) {
+            return
+        }
+
+        po.listFiles { file -> file.extension == "po" }?.forEach { poFile ->
+            val lang = poFile.nameWithoutExtension
+            val targetDir = out.resolve("share/locale/$lang/LC_MESSAGES")
+            targetDir.mkdirs()
+
+            val moFile = targetDir.resolve("isekai.mo")
+
+            execOperations.exec {
+                commandLine("msgfmt", "-o", moFile.absolutePath, poFile.absolutePath)
             }
         }
     }

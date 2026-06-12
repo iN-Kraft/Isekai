@@ -1,0 +1,2 @@
+headers = libintl.h locale.h
+package = dev.datlag.isekai.intl.native

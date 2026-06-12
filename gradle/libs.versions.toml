@@ -15,6 +15,7 @@ coroutines = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core"
 kodein = { group = "org.kodein.di", name = "kodein-di", version.ref = "kodein" }
 kodein-compose-runtime = { group = "org.kodein.di", name = "kodein-di-framework-compose-runtime", version.ref = "kodein" }
 ktor = { group = "io.ktor", name = "ktor-network", version.ref = "ktor" }
+locale = { group = "dev.datlag.kommons", name = "locale", version.ref = "kommons" }
 serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
 
 [plugins]

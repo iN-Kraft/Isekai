@@ -1,0 +1,54 @@
+#
+# Jeff Retz <contact@datlag.dev>, 2026.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Isekai\n"
+"PO-Revision-Date: 2026-06-12 20:13+0200\n"
+"Last-Translator: Jeff Retz <contact@datlag.dev>\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Gtranslator 50.0\n"
+
+msgid "app_name"
+msgstr "Projekt Isekai"
+
+msgid "intro_welcome_title"
+msgstr "Willkommen in einer neuen Welt"
+
+msgid "intro_welcome_text"
+msgstr ""
+"Erlebe Linux ganz ohne Kopfzerbrechen. Du brauchst keine USB-Sticks "
+"vorzubereiten, musst dich nicht mit verwirrenden BIOS-Einstellungen "
+"herumschlagen und keine komplizierten Handbücher wälzen."
+
+msgid "intro_hardware_title"
+msgstr "Keine zusätzliche Hardware nötig"
+
+msgid "intro_hardware_text"
+msgstr ""
+"Projekt Isekai erledigt alles sicher und direkt aus Windows heraus. Es "
+"schaftt behutsam Platz auf deiner Festplatte und richtet ein gemütliches, "
+"isoliertes Zuhause für dein neues System ein."
+
+msgid "intro_data_title"
+msgstr "Deine Daten sind sicher"
+
+msgid "intro_data_text"
+msgstr ""
+"Windows bleibt genau da, wo es ist. Wir richten dir ein praktisches Boot-"
+"Menü ein, damit du bei jedem Start deines PCs ganz entspannt zwischen "
+"Windows und Linux wählen kannst."
+
+msgid "intro_start_title"
+msgstr "Lass uns loslegen"
+
+msgid "intro_start_text"
+msgstr ""
+"Um dein Laufwerk sicher vorzubereiten, benötigt Projekt Isekai die "
+"Erlaubnis, deinen Speicherplatz anzupassen. Sobald du auf Start klickst, "
+"wird Windows dich kurz um Administratorrechte bitten."

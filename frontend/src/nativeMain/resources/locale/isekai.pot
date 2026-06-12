@@ -1,0 +1,37 @@
+msgid ""
+msgstr ""
+"MIME-Version: 1.0\n"
+"Project-Id-Version: Isekai\n"
+"Last-Translator: Jeff Retz <contact@datlag.dev>\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"PO-Revision-Date: 2026-06-12 15:44+0200\n"
+"X-Generator: Gtranslator 50.0\n"
+
+msgid "app_name"
+msgstr ""
+
+msgid "intro_welcome_title"
+msgstr ""
+
+msgid "intro_welcome_text"
+msgstr ""
+
+msgid "intro_hardware_title"
+msgstr ""
+
+msgid "intro_hardware_text"
+msgstr ""
+
+msgid "intro_data_title"
+msgstr ""
+
+msgid "intro_data_text"
+msgstr ""
+
+msgid "intro_start_title"
+msgstr ""
+
+msgid "intro_start_text"
+msgstr ""

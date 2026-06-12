@@ -4,6 +4,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import dev.datlag.isekai.module.AppModule
 import dev.datlag.isekai.module.DaemonLauncher
+import dev.datlag.isekai.module.Translator
 import dev.datlag.isekai.navigation.ConnectionScreen
 import dev.datlag.isekai.navigation.HomeScreen
 import dev.datlag.isekai.navigation.IntroductionScreen
@@ -37,12 +38,15 @@ fun main(args: Array<String>) {
             DaemonLauncher(debug = args.contains("--debug"))
         }
     }
-    GLib.setApplicationName("Project Isekai") // Localize later
+    Translator.initialize()
+
+    val appName = Translator.tr("app_name", "Project Isekai")
+    GLib.setApplicationName(appName)
     GLib.setPrgname("Project Isekai") // Do not localize
 
     adwaitaApplication(
         applicationId = "dev.datlag.isekai",
-        title = "Project Isekai",
+        title = appName,
         args = args.asIterable()
     ) {
         CompositionLocalProvider(LocalDI provides di) {
@@ -53,7 +57,7 @@ fun main(args: Array<String>) {
                 topBar = {
                     TopAppBar(
                         modifier = Modifier.fillMaxWidth(),
-                        title = { WindowTitle("Project Isekai") },
+                        title = { WindowTitle(appName) },
                     )
                 }
             ) {

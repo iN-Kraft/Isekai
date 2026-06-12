@@ -1,5 +1,6 @@
 package dev.datlag.isekai.module
 
+import dev.datlag.kommons.gtk.glib.GLib
 import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.toKString
@@ -11,25 +12,11 @@ import platform.windows.SW_SHOW
 import platform.windows.ShellExecuteW
 import platform.windows.WCHARVar
 
-class DaemonLauncher(val debug: Boolean) {
+class DaemonLauncher(val debug: Boolean) : ExecutableAware {
 
     private val daemonPath: String
         get() {
-            return memScoped {
-                val bufferLength = MAX_PATH
-                val buffer = allocArray<WCHARVar>(bufferLength)
-
-                GetModuleFileNameW(null, buffer, bufferLength.toUInt())
-
-                val frontendPath = buffer.toKString()
-                val lastSlashIndex = frontendPath.lastIndexOf('\\')
-                if (lastSlashIndex >= 0) {
-                    val dir = frontendPath.substring(0, lastSlashIndex)
-                    "$dir\\isekai-daemon.exe"
-                } else {
-                    "isekai-daemon.exe"
-                }
-            }
+            return executablePath?.let { "$it\\isekai-daemon.exe" } ?: "isekai-daemon.exe"
         }
 
     fun startBackend(): Boolean {
