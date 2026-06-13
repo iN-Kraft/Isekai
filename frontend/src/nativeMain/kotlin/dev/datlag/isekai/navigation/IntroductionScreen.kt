@@ -9,11 +9,13 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import dev.datlag.isekai.ipc.ConnectionState
+import dev.datlag.isekai.module.tr
 import dev.datlag.isekai.navigation.model.IntroSlide
 import dev.datlag.isekai.viewmodel.ConnectionViewModel
 import dev.datlag.isekai.viewmodel.SystemViewModel
 import dev.datlag.isekai.viewmodel.kodeinViewModel
 import dev.datlag.kommons.adwaita.CarouselIndicatorDots
+import dev.datlag.kommons.adwaita.compose.component.ButtonContent
 import dev.datlag.kommons.adwaita.compose.component.CarouselIndicatorDots
 import dev.datlag.kommons.adwaita.compose.component.CarouselIndicatorDotsNode
 import dev.datlag.kommons.adwaita.compose.component.CarouselState
@@ -91,13 +93,12 @@ fun IntroductionScreen(
         ) {
             if (!isLastPage) {
                 Button(
-                    modifier = Modifier.css("pill"),
+                    modifier = Modifier.css("flat", "pill"),
                     onClick = {
                         currentPage = IntroSlide.collection.lastIndex
-                    }
-                ) {
-                    Text(text = "Skip")
-                }
+                    },
+                    label = tr("intro_skip", "Skip")
+                )
             } else {
                 Box(modifier = Modifier.size(width = 80)) {}
             }
@@ -110,7 +111,17 @@ fun IntroductionScreen(
                     if (isLastPage) onStartAction() else currentPage++
                 }
             ) {
-                Text(if (isLastPage) "Start" else "Next")
+                if (isLastPage) {
+                    ButtonContent(
+                        label = tr("intro_start", "Start"),
+                        iconName = "media-playback-start-symbolic"
+                    )
+                } else {
+                    ButtonContent(
+                        label = tr("intro_next", "Next"),
+                        iconName = "go-next-symbolic"
+                    )
+                }
             }
         }
     }

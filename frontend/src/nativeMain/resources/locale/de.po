@@ -4,7 +4,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: Isekai\n"
-"PO-Revision-Date: 2026-06-12 20:13+0200\n"
+"PO-Revision-Date: 2026-06-13 13:29+0200\n"
 "Last-Translator: Jeff Retz <contact@datlag.dev>\n"
 "Language-Team: English\n"
 "Language: en\n"
@@ -52,3 +52,39 @@ msgstr ""
 "Um dein Laufwerk sicher vorzubereiten, benötigt Projekt Isekai die "
 "Erlaubnis, deinen Speicherplatz anzupassen. Sobald du auf Start klickst, "
 "wird Windows dich kurz um Administratorrechte bitten."
+
+msgid "intro_skip"
+msgstr "Überspringen"
+
+msgid "intro_next"
+msgstr "Weiter"
+
+msgid "intro_start"
+msgstr "Start"
+
+msgid "connection_connecting_title"
+msgstr "Verbinden"
+
+msgid "connection_connected_title"
+msgstr "Verbunden"
+
+msgid "connection_disconnected_title"
+msgstr "Getrennt"
+
+msgid "connection_error_title"
+msgstr "Verbindungsfehler"
+
+msgid "connection_connecting_text"
+msgstr "Baue eine sichere Verbindung zum Hintergrunddienst auf."
+
+msgid "connection_connected_text"
+msgstr "Verbindung erfolgreich hergstellt."
+
+msgid "connection_disconnected_text"
+msgstr "Die Verbindung zum Hintergrunddienst wurde leider unterbrochen."
+
+msgid "connection_error_text"
+msgstr "Ein Fehler ist aufgetreten: "
+
+msgid "connection_retry"
+msgstr "Erneut versuchen"

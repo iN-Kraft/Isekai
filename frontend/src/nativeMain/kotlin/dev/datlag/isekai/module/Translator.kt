@@ -28,11 +28,7 @@ object Translator : ExecutableAware {
         libintl_textdomain(DOMAIN)
     }
 
-    fun tr(msgId: String, default: () -> String): String {
-        return tr(msgId, default())
-    }
-
-    fun tr(msgId: String, default: String): String {
+    fun translate(msgId: String, default: String): String {
         val translated = GLib.dgettext(DOMAIN, msgId) ?: default
 
         if (translated == msgId) {
@@ -40,4 +36,12 @@ object Translator : ExecutableAware {
         }
         return translated
     }
+}
+
+fun tr(msgId: String, default: () -> String): String {
+    return tr(msgId, default())
+}
+
+fun tr(msgId: String, default: String): String {
+    return Translator.translate(msgId, default)
 }

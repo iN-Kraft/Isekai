@@ -78,6 +78,7 @@ kotlin {
                 // 2. Pass the absolute paths to the .dll.a import libraries!
                 // This completely prevents the LLVM linker from discovering the host's conflicting C-Runtime.
                 linkerOpts(
+                    "-mwindows",
                     "$mingwLibDir/libglib-2.0.dll.a",
                     "$mingwLibDir/libgobject-2.0.dll.a",
                     "$mingwLibDir/libgmodule-2.0.dll.a",
@@ -224,6 +225,7 @@ val bundleGtkDependencies by tasks.registering(Sync::class) {
         include("libEGL*.dll")
         include("libGLESv2*.dll")
         include("libvkd3d*.dll")
+        include("*d3dcompiler*.dll")
     }
 
     from(mingwSysroot.resolve("share/glib-2.0/schemas")) {
@@ -234,6 +236,10 @@ val bundleGtkDependencies by tasks.registering(Sync::class) {
     from(mingwSysroot.resolve("share/icons")) {
         into("share/icons")
         include("Adwaita/**", "hicolor/**")
+    }
+
+    from(rootProject.file("assets/dev.datlag.Isekai.svg")) {
+        into("share/icons/hicolor/scalable/apps")
     }
 }
 

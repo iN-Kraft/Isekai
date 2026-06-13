@@ -35,3 +35,39 @@ msgstr ""
 
 msgid "intro_start_text"
 msgstr ""
+
+msgid "intro_skip"
+msgstr ""
+
+msgid "intro_next"
+msgstr ""
+
+msgid "intro_start"
+msgstr ""
+
+msgid "connection_connecting_title"
+msgstr ""
+
+msgid "connection_connected_title"
+msgstr ""
+
+msgid "connection_disconnected_title"
+msgstr ""
+
+msgid "connection_error_title"
+msgstr ""
+
+msgid "connection_connecting_text"
+msgstr ""
+
+msgid "connection_connected_text"
+msgstr ""
+
+msgid "connection_disconnected_text"
+msgstr ""
+
+msgid "connection_error_text"
+msgstr ""
+
+msgid "connection_retry"
+msgstr ""
