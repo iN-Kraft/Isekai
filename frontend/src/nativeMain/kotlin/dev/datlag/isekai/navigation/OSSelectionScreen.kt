@@ -6,7 +6,10 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import dev.datlag.isekai.navigation.component.DefaultScreen
 import dev.datlag.isekai.navigation.model.DistroList
+import dev.datlag.isekai.viewmodel.FileSelectViewModel
+import dev.datlag.isekai.viewmodel.kodeinViewModel
 import dev.datlag.kommons.adwaita.ViewSwitcherPolicy
 import dev.datlag.kommons.adwaita.compose.component.ActionRow
 import dev.datlag.kommons.adwaita.compose.component.Clamp
@@ -19,9 +22,11 @@ import dev.datlag.kommons.adwaita.compose.component.ViewStack
 import dev.datlag.kommons.adwaita.compose.component.ViewStackPage
 import dev.datlag.kommons.adwaita.compose.component.ViewSwitcher
 import dev.datlag.kommons.adwaita.compose.component.rememberViewStackState
-import dev.datlag.kommons.gtk.ActionBar
 import dev.datlag.kommons.gtk.Align
-import dev.datlag.kommons.gtk.compose.component.Box
+import dev.datlag.kommons.gtk.FileDialog
+import dev.datlag.kommons.gtk.FileFilter
+import dev.datlag.kommons.gtk.FilterListModel
+import dev.datlag.kommons.gtk.compose.LocalWindow
 import dev.datlag.kommons.gtk.compose.component.Button
 import dev.datlag.kommons.gtk.compose.component.Column
 import dev.datlag.kommons.gtk.compose.component.LinkButton
@@ -30,7 +35,7 @@ import dev.datlag.kommons.gtk.compose.modifier.alignVertical
 import dev.datlag.kommons.gtk.compose.modifier.css
 import dev.datlag.kommons.gtk.compose.modifier.fillMaxSize
 import dev.datlag.kommons.gtk.compose.modifier.fillMaxWidth
-import dev.datlag.kommons.gtk.compose.modifier.padding
+import dev.datlag.kommons.gtk.gio.File
 
 @Composable
 fun OSSelectionScreen(
@@ -40,16 +45,8 @@ fun OSSelectionScreen(
     var selectedTab by remember { mutableStateOf("desktop") }
     val viewStackState = rememberViewStackState()
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        topBar = {
-            TopAppBar(
-                modifier = Modifier.fillMaxWidth(),
-                title = {
-                    ViewSwitcher(state = viewStackState, policy = ViewSwitcherPolicy.WIDE)
-                }
-            )
-        }
+    DefaultScreen(
+        title = { ViewSwitcher(state = viewStackState, policy = ViewSwitcherPolicy.WIDE) }
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             ViewStack(
@@ -131,6 +128,9 @@ private fun DistroListView(
             PreferencesGroup(
                 title = "Other"
             ) {
+                val fileSelector = kodeinViewModel<FileSelectViewModel>()
+                var selectedIso by remember { mutableStateOf<File?>(null) }
+
                 ActionRow(
                     title = "Unsure what to pick?",
                     subtitle = "Try them out online",
@@ -144,12 +144,16 @@ private fun DistroListView(
                 )
                 ActionRow(
                     title = "Select local ISO",
-                    subtitle = "Bring your own distribution",
+                    subtitle = selectedIso?.getPath()?.ifBlank { null } ?: "Bring your own distribution",
                     suffix = {
+                        val currentWindow = LocalWindow.current
+
                         Button(
                             modifier = Modifier.alignVertical(Align.CENTER),
                             label = "Browse",
-                            onClick = onLocalSelect
+                            onClick = {
+                                fileSelector.selectISO(currentWindow) { selectedIso = it }
+                            }
                         )
                     }
                 )

@@ -5,6 +5,7 @@ import dev.datlag.isekai.repository.DiskRepository
 import dev.datlag.isekai.repository.SystemRepository
 import dev.datlag.isekai.viewmodel.ConnectionViewModel
 import dev.datlag.isekai.viewmodel.DiskViewModel
+import dev.datlag.isekai.viewmodel.FileSelectViewModel
 import dev.datlag.isekai.viewmodel.SystemViewModel
 import kotlinx.coroutines.CoroutineScope
 import org.kodein.di.DI
@@ -33,6 +34,10 @@ object AppModule {
 
         bindFactory<CoroutineScope, DiskViewModel> { scope ->
             DiskViewModel(directDI = this, viewModelScope = scope)
+        }
+
+        bindFactory<CoroutineScope, FileSelectViewModel> { scope ->
+            FileSelectViewModel(directDI = this, viewModelScope = scope)
         }
     }
 

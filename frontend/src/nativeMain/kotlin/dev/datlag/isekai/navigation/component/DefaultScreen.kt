@@ -24,6 +24,8 @@ val LocalAppName = staticCompositionLocalOf<String> { tr("app_name", "Project Is
 
 @Composable
 fun DefaultScreen(
+    showBackButton: Boolean = false,
+    title: @Composable () -> Unit = { WindowTitle(title = LocalAppName.current) },
     content: @Composable () -> Unit
 ) {
     Scaffold(
@@ -31,7 +33,8 @@ fun DefaultScreen(
         topBar = {
             TopAppBar(
                 modifier = Modifier.fillMaxWidth(),
-                title = { WindowTitle(title = LocalAppName.current) },
+                title = title,
+                showBackButton = showBackButton,
                 actions = {
                     var aboutDialogVisible by remember { mutableStateOf(false) }
 
