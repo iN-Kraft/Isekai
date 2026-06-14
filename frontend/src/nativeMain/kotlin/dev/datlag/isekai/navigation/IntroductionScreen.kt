@@ -10,6 +10,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import dev.datlag.isekai.ipc.ConnectionState
 import dev.datlag.isekai.module.tr
+import dev.datlag.isekai.navigation.component.DefaultScreen
 import dev.datlag.isekai.navigation.model.IntroSlide
 import dev.datlag.isekai.viewmodel.ConnectionViewModel
 import dev.datlag.isekai.viewmodel.SystemViewModel
@@ -41,7 +42,7 @@ import kotlinx.coroutines.IO
 @Composable
 fun IntroductionScreen(
     onNavigateNext: (Screen) -> Unit
-) {
+) = DefaultScreen {
     val connectionViewModel = kodeinViewModel<ConnectionViewModel>(dispatcher = Dispatchers.IO)
     val systemViewModel = kodeinViewModel<SystemViewModel>(dispatcher = Dispatchers.IO)
     

@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import dev.datlag.isekai.Symbols
 import dev.datlag.isekai.ipc.ConnectionState
 import dev.datlag.isekai.module.tr
+import dev.datlag.isekai.navigation.component.DefaultScreen
 import dev.datlag.isekai.viewmodel.ConnectionViewModel
 import dev.datlag.isekai.viewmodel.kodeinViewModel
 import dev.datlag.kommons.adwaita.compose.component.ButtonContent
@@ -24,7 +25,7 @@ import kotlin.time.Duration.Companion.seconds
 @Composable
 fun ConnectionScreen(
     onConnected: () -> Unit
-) {
+) = DefaultScreen {
     val viewModel = kodeinViewModel<ConnectionViewModel>(dispatcher = Dispatchers.IO)
     val connectionState by viewModel.connectionState.collectAsState()
 

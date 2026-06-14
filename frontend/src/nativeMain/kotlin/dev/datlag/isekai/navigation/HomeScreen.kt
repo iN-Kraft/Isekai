@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import dev.datlag.isekai.navigation.component.DefaultScreen
 import dev.datlag.isekai.viewmodel.DiskViewModel
 import dev.datlag.isekai.viewmodel.kodeinViewModel
 import dev.datlag.kommons.gtk.compose.component.Button
@@ -13,7 +14,7 @@ import dev.datlag.kommons.gtk.compose.modifier.Modifier
 import dev.datlag.kommons.gtk.compose.modifier.padding
 
 @Composable
-fun HomeScreen() {
+fun HomeScreen() = DefaultScreen {
     val viewModel = kodeinViewModel<DiskViewModel>()
     val disks by viewModel.disks.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()

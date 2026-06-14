@@ -5,6 +5,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import dev.datlag.isekai.Symbols
+import dev.datlag.isekai.navigation.component.DefaultScreen
 import dev.datlag.isekai.viewmodel.SystemViewModel
 import dev.datlag.isekai.viewmodel.kodeinViewModel
 import dev.datlag.kommons.adwaita.compose.component.StatusPage
@@ -17,7 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 
 @Composable
-fun SystemCheckScreen(onReady: () -> Unit) {
+fun SystemCheckScreen(onReady: () -> Unit) = DefaultScreen {
     val viewModel = kodeinViewModel<SystemViewModel>(dispatcher = Dispatchers.IO)
     val report by viewModel.systemReport.collectAsState()
     val error by viewModel.error.collectAsState()

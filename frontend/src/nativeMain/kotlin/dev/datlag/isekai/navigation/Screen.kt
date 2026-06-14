@@ -15,5 +15,8 @@ sealed interface Screen : NavKey {
     data object SystemCheck : Screen
 
     @Serializable
+    data object OSSelection : Screen
+
+    @Serializable
     data object Home : Screen
 }

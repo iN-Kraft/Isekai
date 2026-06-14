@@ -14,8 +14,10 @@ import dev.datlag.isekai.navigation.HomeScreen
 import dev.datlag.isekai.navigation.IntroductionScreen
 import dev.datlag.isekai.navigation.NavBackStack
 import dev.datlag.isekai.navigation.NavHost
+import dev.datlag.isekai.navigation.OSSelectionScreen
 import dev.datlag.isekai.navigation.Screen
 import dev.datlag.isekai.navigation.SystemCheckScreen
+import dev.datlag.isekai.navigation.component.LocalAppName
 import dev.datlag.kommons.adwaita.compose.adwaitaApplication
 import dev.datlag.kommons.adwaita.compose.component.AboutDialog
 import dev.datlag.kommons.adwaita.compose.component.Scaffold
@@ -59,62 +61,35 @@ fun main(args: Array<String>) {
         title = appName,
         args = args.asIterable()
     ) {
-        CompositionLocalProvider(LocalDI provides di) {
+        CompositionLocalProvider(
+            LocalDI provides di,
+            LocalAppName provides appName
+        ) {
             val backStack = remember { NavBackStack<Screen>(Screen.Introduction) }
 
-            Scaffold(
-                modifier = Modifier.fillMaxSize(),
-                topBar = {
-                    TopAppBar(
-                        modifier = Modifier.fillMaxWidth(),
-                        title = { WindowTitle(appName) },
-                        actions = {
-                            var aboutDialogVisible by remember { mutableStateOf(false) }
-
-                            AboutDialog(
-                                visible = aboutDialogVisible,
-                                applicationName = appName,
-                                applicationIcon = "dev.datlag.Isekai",
-                                version = "1.0.0",
-                                developerName = "iNKraft",
-                                developers = listOf("Jeff Retz https://github.com/DatL4g"),
-                                website = "https://datlag.dev",
-                                supportUrl = "https://github.com/iN-Kraft/Isekai",
-                                issueUrl = "https://github.com/iN-Kraft/Isekai/issues",
-                                licenseType = License.GPL_3_0,
-                                onClosed = { aboutDialogVisible = false }
-                            )
-
-                            Button(
-                                modifier = Modifier.css("flat", "circular"),
-                                onClick = {
-                                    aboutDialogVisible = !aboutDialogVisible
-                                }
-                            ) {
-                                Image(iconName = IconName("help-about-symbolic"))
-                            }
-                        }
-                    )
-                }
-            ) {
-                NavHost(backStack = backStack) { currentScreen ->
-                    when (currentScreen) {
-                        is Screen.Introduction -> {
-                            IntroductionScreen(onNavigateNext = { nextScreen -> backStack.replaceAll(nextScreen) })
-                        }
-                        is Screen.Connection -> {
-                            ConnectionScreen(
-                                onConnected = { backStack.replaceAll(Screen.SystemCheck) }
-                            )
-                        }
-                        is Screen.SystemCheck -> {
-                            SystemCheckScreen(
-                                onReady = { backStack.replaceAll(Screen.Home) }
-                            )
-                        }
-                        is Screen.Home -> {
-                            HomeScreen()
-                        }
+            NavHost(backStack = backStack) { currentScreen ->
+                when (currentScreen) {
+                    is Screen.Introduction -> {
+                        IntroductionScreen(onNavigateNext = { nextScreen -> backStack.replaceAll(nextScreen) })
+                    }
+                    is Screen.Connection -> {
+                        ConnectionScreen(
+                            onConnected = { backStack.replaceAll(Screen.SystemCheck) }
+                        )
+                    }
+                    is Screen.SystemCheck -> {
+                        SystemCheckScreen(
+                            onReady = { backStack.replaceAll(Screen.OSSelection) }
+                        )
+                    }
+                    is Screen.OSSelection -> {
+                        OSSelectionScreen(
+                            onSelected = {},
+                            onLocalSelected = {}
+                        )
+                    }
+                    is Screen.Home -> {
+                        HomeScreen()
                     }
                 }
             }
