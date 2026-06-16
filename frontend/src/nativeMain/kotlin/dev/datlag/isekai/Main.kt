@@ -9,6 +9,7 @@ import dev.datlag.isekai.module.AppModule
 import dev.datlag.isekai.module.DaemonLauncher
 import dev.datlag.isekai.module.Translator
 import dev.datlag.isekai.module.tr
+import dev.datlag.isekai.navigation.BlueprintScreen
 import dev.datlag.isekai.navigation.ConnectionScreen
 import dev.datlag.isekai.navigation.HomeScreen
 import dev.datlag.isekai.navigation.IntroductionScreen
@@ -84,9 +85,12 @@ fun main(args: Array<String>) {
                     }
                     is Screen.OSSelection -> {
                         OSSelectionScreen(
-                            onSelected = {},
+                            onSelected = { backStack.push(Screen.BlueprintScreen) },
                             onLocalSelected = {}
                         )
+                    }
+                    is Screen.BlueprintScreen -> {
+                        BlueprintScreen(onBack = { backStack.pop() })
                     }
                     is Screen.Home -> {
                         HomeScreen()

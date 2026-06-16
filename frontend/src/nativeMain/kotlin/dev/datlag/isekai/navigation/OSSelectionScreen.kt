@@ -60,7 +60,7 @@ fun OSSelectionScreen(
                     title = "Desktop",
                     iconName = "computer-symbolic"
                 ) {
-                    DistroListView(DistroList.desktop, onSelect = {}, onLocalSelect = {})
+                    DistroListView(DistroList.desktop, onSelect = { onSelected() }, onLocalSelect = {})
                 }
 
                 ViewStackPage(
@@ -68,7 +68,7 @@ fun OSSelectionScreen(
                     title = "Gaming",
                     iconName = "input-gaming-symbolic"
                 ) {
-                    DistroListView(DistroList.gaming, onSelect = {}, onLocalSelect = {})
+                    DistroListView(DistroList.gaming, onSelect = { onSelected() }, onLocalSelect = {})
                 }
             }
         }

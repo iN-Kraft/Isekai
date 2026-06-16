@@ -3,6 +3,7 @@ package dev.datlag.isekai.viewmodel
 import arrow.core.raise.fold
 import dev.datlag.isekai.ipc.Disk
 import dev.datlag.isekai.ipc.IPCError
+import dev.datlag.isekai.ipc.Partition
 import dev.datlag.isekai.repository.DiskRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -50,5 +51,22 @@ class DiskViewModel(
                 }
             )
         }
+    }
+
+    suspend fun loadPartitions(disk: Disk): List<Partition> {
+        return fold(
+            block = { repository.getPartitions(disk.stableId) },
+            catch = { e ->
+                e.printStackTrace()
+                emptyList()
+            },
+            recover = { err: IPCError ->
+                println(err)
+                emptyList()
+            },
+            transform = { parts ->
+                parts
+            }
+        )
     }
 }

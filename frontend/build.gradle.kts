@@ -78,7 +78,7 @@ kotlin {
                 // 2. Pass the absolute paths to the .dll.a import libraries!
                 // This completely prevents the LLVM linker from discovering the host's conflicting C-Runtime.
                 linkerOpts(
-                    "-mwindows",
+                    "-mwindows", // No CMD
                     "$mingwLibDir/libglib-2.0.dll.a",
                     "$mingwLibDir/libgobject-2.0.dll.a",
                     "$mingwLibDir/libgmodule-2.0.dll.a",

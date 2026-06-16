@@ -18,5 +18,8 @@ sealed interface Screen : NavKey {
     data object OSSelection : Screen
 
     @Serializable
+    data object BlueprintScreen : Screen
+
+    @Serializable
     data object Home : Screen
 }
