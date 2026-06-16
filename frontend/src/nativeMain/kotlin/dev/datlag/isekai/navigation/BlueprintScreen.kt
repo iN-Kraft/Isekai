@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import dev.datlag.isekai.ipc.BitLockerState
 import dev.datlag.isekai.ipc.Partition
 import dev.datlag.isekai.viewmodel.DiskViewModel
 import dev.datlag.isekai.viewmodel.kodeinViewModel
@@ -49,7 +50,11 @@ fun BlueprintScreen(
     var selectedPartitionIndex by remember(partitions) {
         mutableStateOf(0)
     }
-    var isBitLockerActive by remember { mutableStateOf(true) }
+    var isBitLockerActive by remember(partitions, selectedPartitionIndex) {
+        mutableStateOf(partitions.getOrNull(selectedPartitionIndex)?.let {
+            it.bitlockerState != BitLockerState.Unprotected
+        } ?: false)
+    }
 
     LaunchedEffect(Unit) {
         diskViewModel.loadDisks()
@@ -67,7 +72,7 @@ fun BlueprintScreen(
 
     val partitionModel = remember(partitions) {
         StringList(partitions.map { part ->
-            val driveDisplay = part.driveLetter?.let { "$it:" } ?: "Volume"
+            val driveDisplay = part.driveLetter ?: "Volume"
             "$driveDisplay (${part.fileSystem}) - ${part.sizeGb}GB"
         })
     }
@@ -101,8 +106,7 @@ fun BlueprintScreen(
     ) {
         Clamp(modifier = Modifier.fillMaxSize(), maximumSize = 800) {
             PreferencesPage(
-                modifier = Modifier.fillMaxSize(),
-                enabled = !isBitLockerActive
+                modifier = Modifier.fillMaxSize()
             ) {
                 PreferencesGroup(
                     title = "Destination Drive",
@@ -147,7 +151,8 @@ fun BlueprintScreen(
                 }
 
                 PreferencesGroup(
-                    title = "System"
+                    title = "System",
+                    enabled = !isBitLockerActive
                 ) {
                     var delete by remember { mutableStateOf(false) }
 

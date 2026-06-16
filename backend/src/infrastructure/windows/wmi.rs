@@ -1,5 +1,5 @@
 #![allow(non_snake_case)]
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
@@ -50,7 +50,7 @@ pub struct EncryptableVolume {
     pub protection_status: Option<u32>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize, Clone)]
 pub enum BitLockerState {
     Unprotected, // Safe to modify
     Locked, // Needs unlock

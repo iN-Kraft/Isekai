@@ -6,12 +6,13 @@ use windows_sys::Win32::System::SystemInformation::{FirmwareTypeUefi, GetFirmwar
 use crate::domain::errors::DiskError;
 use crate::domain::models::{Disk, Partition};
 use crate::domain::traits::DiskManager;
-use crate::infrastructure::windows::wmi::{MsftDisk, MsftPartition, MsftPhysicalDisk, MsftVolume};
+use crate::infrastructure::windows::wmi::{BitLockerState, MsftDisk, MsftPartition, MsftPhysicalDisk, MsftVolume};
 use crate::infrastructure::windows::utils::PartitionUtils;
 use wmi::WMIConnection;
 use crate::application::spawn_blocking_with_context;
 use crate::domain::{PARTITION_LABEL_EFI, PARTITION_LABEL_LIVE};
 use crate::infrastructure::CommandExt;
+use crate::infrastructure::windows::bitlocker::BitLocker;
 use crate::telemetry;
 
 pub struct WindowsDiskManager {
@@ -320,6 +321,13 @@ impl DiskManager for WindowsDiskManager {
                 part.MbrType
             ));
 
+            let mut bl_state = BitLockerState::Unprotected;
+            if let Some(ref dl) = drive_letter {
+                if let Ok(state) = BitLocker::get_state(Some(dl)).await {
+                    bl_state = state;
+                }
+            }
+
             partitions.push(Partition {
                 id: part.PartitionNumber.to_string(),
                 drive_letter,
@@ -328,7 +336,8 @@ impl DiskManager for WindowsDiskManager {
                 label,
                 offset_bytes: part.Offset.unwrap_or(0),
                 size_bytes: size_bytes,
-                free_bytes
+                free_bytes,
+                bitlocker_state: bl_state
             });
         }
 

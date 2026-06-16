@@ -76,8 +76,16 @@ data class Partition(
     val id: String,
     val driveLetter: String? = null,
     val sizeGb: UInt,
-    val fileSystem: String
+    val fileSystem: String,
+    val bitlockerState: BitLockerState
 )
+
+@Serializable
+enum class BitLockerState {
+    @SerialName("Unprotected") Unprotected,
+    @SerialName("Protected") Protected,
+    @SerialName("Locked") Locked
+}
 
 @Serializable
 data class ValidationReport(

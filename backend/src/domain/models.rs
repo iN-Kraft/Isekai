@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use crate::infrastructure::windows::wmi::BitLockerState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all="camelCase")]
@@ -11,7 +12,7 @@ pub struct Disk {
     pub is_gpt: bool
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct Partition {
     pub id: String,
@@ -21,7 +22,8 @@ pub struct Partition {
     pub label: String,
     pub offset_bytes: u64,
     pub size_bytes: u64,
-    pub free_bytes: u64
+    pub free_bytes: u64,
+    pub bitlocker_state: BitLockerState
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
