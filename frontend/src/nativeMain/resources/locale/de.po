@@ -88,3 +88,27 @@ msgstr "Ein Fehler ist aufgetreten: "
 
 msgid "connection_retry"
 msgstr "Erneut versuchen"
+
+msgid "distro_select_desktop"
+msgstr "Desktop"
+
+msgid "distro_select_gaming"
+msgstr "Gaming"
+
+msgid "distro_select_download"
+msgstr "Herunterladen"
+
+msgid "distro_select_unsure_title"
+msgstr "Unsicher was am besten passt?"
+
+msgid "distro_select_unsure_text"
+msgstr "Teste sie direkt im Browser"
+
+msgid "distro_select_local_title"
+msgstr "Eigene ISO-Datei verwenden"
+
+msgid "distro_select_local_text"
+msgstr "Installiere eine bereits heruntergeladene Distribution"
+
+msgid "distro_select_browse"
+msgstr "Durchsuchen"

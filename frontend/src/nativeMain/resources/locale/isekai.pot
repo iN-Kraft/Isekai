@@ -71,3 +71,27 @@ msgstr ""
 
 msgid "connection_retry"
 msgstr ""
+
+msgid "distro_select_desktop"
+msgstr ""
+
+msgid "distro_select_gaming"
+msgstr ""
+
+msgid "distro_select_download"
+msgstr ""
+
+msgid "distro_select_unsure_title"
+msgstr ""
+
+msgid "distro_select_unsure_text"
+msgstr ""
+
+msgid "distro_select_local_title"
+msgstr ""
+
+msgid "distro_select_local_text"
+msgstr ""
+
+msgid "distro_select_browse"
+msgstr ""

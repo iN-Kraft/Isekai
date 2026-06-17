@@ -6,11 +6,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
-import dev.datlag.isekai.module.tr
+import dev.datlag.isekai.translation.TranslationScreen
+import dev.datlag.isekai.translation.Translator
 import dev.datlag.kommons.adwaita.compose.component.AboutDialog
 import dev.datlag.kommons.adwaita.compose.component.Scaffold
+import dev.datlag.kommons.adwaita.compose.component.SnackbarHostState
 import dev.datlag.kommons.adwaita.compose.component.TopAppBar
 import dev.datlag.kommons.adwaita.compose.component.WindowTitle
+import dev.datlag.kommons.adwaita.compose.component.rememberSnackbarHostState
 import dev.datlag.kommons.gtk.License
 import dev.datlag.kommons.gtk.compose.component.Button
 import dev.datlag.kommons.gtk.compose.component.IconName
@@ -20,20 +23,23 @@ import dev.datlag.kommons.gtk.compose.modifier.css
 import dev.datlag.kommons.gtk.compose.modifier.fillMaxSize
 import dev.datlag.kommons.gtk.compose.modifier.fillMaxWidth
 
-val LocalAppName = staticCompositionLocalOf<String> { tr("app_name", "Project Isekai") }
+val LocalAppName = staticCompositionLocalOf<String> { Translator.translate("app_name", "Project Isekai") }
 
 @Composable
-fun DefaultScreen(
+fun <T : TranslationScreen> DefaultScreen(
+    translation: T,
     showBackButton: Boolean = false,
-    title: @Composable () -> Unit = { WindowTitle(title = LocalAppName.current) },
-    content: @Composable () -> Unit
-) {
+    title: @Composable T.() -> Unit = { WindowTitle(title = LocalAppName.current) },
+    content: @Composable T.(SnackbarHostState) -> Unit
+) = with(translation) {
+    val snackbarState = rememberSnackbarHostState()
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
                 modifier = Modifier.fillMaxWidth(),
-                title = title,
+                title = { title() },
                 showBackButton = showBackButton,
                 actions = {
                     var aboutDialogVisible by remember { mutableStateOf(false) }
@@ -63,6 +69,7 @@ fun DefaultScreen(
                 }
             )
         },
-        content = content
+        snackbarHostState = snackbarState,
+        content = { content(snackbarState) }
     )
 }

@@ -1,8 +1,9 @@
-package dev.datlag.isekai.module
+package dev.datlag.isekai.translation
 
 import dev.datlag.isekai.intl.native.libintl_bind_textdomain_codeset
 import dev.datlag.isekai.intl.native.libintl_bindtextdomain
 import dev.datlag.isekai.intl.native.libintl_textdomain
+import dev.datlag.isekai.module.ExecutableAware
 import dev.datlag.kommons.gtk.glib.GLib
 import dev.datlag.kommons.locale.Locale
 import platform.posix.LC_ALL
@@ -36,12 +37,4 @@ object Translator : ExecutableAware {
         }
         return translated
     }
-}
-
-fun tr(msgId: String, default: () -> String): String {
-    return tr(msgId, default())
-}
-
-fun tr(msgId: String, default: String): String {
-    return Translator.translate(msgId, default)
 }

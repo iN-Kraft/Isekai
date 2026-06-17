@@ -2,12 +2,12 @@ package dev.datlag.isekai.navigation
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import dev.datlag.isekai.navigation.component.DefaultScreen
 import dev.datlag.isekai.navigation.model.DistroList
+import dev.datlag.isekai.translation.DistroSelection
 import dev.datlag.isekai.viewmodel.FileSelectViewModel
 import dev.datlag.isekai.viewmodel.kodeinViewModel
 import dev.datlag.kommons.adwaita.ViewSwitcherPolicy
@@ -16,16 +16,11 @@ import dev.datlag.kommons.adwaita.compose.component.Clamp
 import dev.datlag.kommons.adwaita.compose.component.ExpanderRow
 import dev.datlag.kommons.adwaita.compose.component.PreferencesGroup
 import dev.datlag.kommons.adwaita.compose.component.PreferencesPage
-import dev.datlag.kommons.adwaita.compose.component.Scaffold
-import dev.datlag.kommons.adwaita.compose.component.TopAppBar
 import dev.datlag.kommons.adwaita.compose.component.ViewStack
 import dev.datlag.kommons.adwaita.compose.component.ViewStackPage
 import dev.datlag.kommons.adwaita.compose.component.ViewSwitcher
 import dev.datlag.kommons.adwaita.compose.component.rememberViewStackState
 import dev.datlag.kommons.gtk.Align
-import dev.datlag.kommons.gtk.FileDialog
-import dev.datlag.kommons.gtk.FileFilter
-import dev.datlag.kommons.gtk.FilterListModel
 import dev.datlag.kommons.gtk.compose.LocalWindow
 import dev.datlag.kommons.gtk.compose.component.Button
 import dev.datlag.kommons.gtk.compose.component.Column
@@ -34,20 +29,19 @@ import dev.datlag.kommons.gtk.compose.modifier.Modifier
 import dev.datlag.kommons.gtk.compose.modifier.alignVertical
 import dev.datlag.kommons.gtk.compose.modifier.css
 import dev.datlag.kommons.gtk.compose.modifier.fillMaxSize
-import dev.datlag.kommons.gtk.compose.modifier.fillMaxWidth
 import dev.datlag.kommons.gtk.gio.File
 
 @Composable
-fun OSSelectionScreen(
-    onSelected: () -> Unit,
-    onLocalSelected: () -> Unit
+fun DistroSelectionScreen(
+    onSelected: (Screen.BlueprintScreen) -> Unit
 ) {
     var selectedTab by remember { mutableStateOf("desktop") }
     val viewStackState = rememberViewStackState()
 
     DefaultScreen(
+        translation = DistroSelection,
         title = { ViewSwitcher(state = viewStackState, policy = ViewSwitcherPolicy.WIDE) }
-    ) {
+    ) { snackbarHostState ->
         Column(modifier = Modifier.fillMaxSize()) {
             ViewStack(
                 modifier = Modifier.fillMaxSize(),
@@ -57,18 +51,42 @@ fun OSSelectionScreen(
             ) {
                 ViewStackPage(
                     name = "desktop",
-                    title = "Desktop",
+                    title = DESKTOP,
                     iconName = "computer-symbolic"
                 ) {
-                    DistroListView(DistroList.desktop, onSelect = { onSelected() }, onLocalSelect = {})
+                    DistroListView(
+                        DistroList.desktop,
+                        onSelect = onSelected,
+                        onLocalSelect = { file ->
+                            val filePath = file.peekPath()?.ifBlank { null } ?: file.getPath()?.ifBlank { null }
+
+                            if (filePath.isNullOrBlank()) {
+                                snackbarHostState.showSnackbar(title = "Could not resolve path for: ${file.getBasename()}")
+                            } else {
+                                onSelected(Screen.BlueprintScreen.LocalFile(filePath))
+                            }
+                        }
+                    )
                 }
 
                 ViewStackPage(
                     name = "gaming",
-                    title = "Gaming",
+                    title = GAMING,
                     iconName = "input-gaming-symbolic"
                 ) {
-                    DistroListView(DistroList.gaming, onSelect = { onSelected() }, onLocalSelect = {})
+                    DistroListView(
+                        DistroList.gaming,
+                        onSelect = onSelected,
+                        onLocalSelect = { file ->
+                            val filePath = file.peekPath()?.ifBlank { null } ?: file.getPath()?.ifBlank { null }
+
+                            if (filePath.isNullOrBlank()) {
+                                snackbarHostState.showSnackbar(title = "Could not resolve path for: ${file.getBasename()}")
+                            } else {
+                                onSelected(Screen.BlueprintScreen.LocalFile(filePath))
+                            }
+                        }
+                    )
                 }
             }
         }
@@ -78,9 +96,9 @@ fun OSSelectionScreen(
 @Composable
 private fun DistroListView(
     distroGroups: List<DistroList>,
-    onSelect: (DistroList.Distro) -> Unit,
-    onLocalSelect: () -> Unit
-) {
+    onSelect: (Screen.BlueprintScreen.Download) -> Unit,
+    onLocalSelect: (File) -> Unit
+) = with(DistroSelection) {
     Clamp(modifier = Modifier.fillMaxSize(), maximumSize = 800) {
         PreferencesPage(modifier = Modifier.fillMaxSize()) {
             distroGroups.forEach { distroGroup ->
@@ -92,12 +110,18 @@ private fun DistroListView(
                             ActionRow(
                                 title = distro.name,
                                 subtitle = distro.tagline,
-                                onActivated = { onSelect(distro) },
                                 suffix = {
                                     Button(
                                         modifier = Modifier.css("suggested-action").alignVertical(Align.CENTER),
-                                        label = "Select",
-                                        onClick = { onSelect(distro) }
+                                        label = DOWNLOAD,
+                                        onClick = {
+                                            onSelect(
+                                                Screen.BlueprintScreen.Download(
+                                                    name = distro.name,
+                                                    edition = null
+                                                )
+                                            )
+                                        }
                                     )
                                 }
                             )
@@ -110,12 +134,18 @@ private fun DistroListView(
                                     ActionRow(
                                         title = edition.name,
                                         subtitle = edition.description,
-                                        onActivated = { onSelect(distro) },
                                         suffix = {
                                             Button(
                                                 modifier = Modifier.css("suggested-action").alignVertical(Align.CENTER),
-                                                label = "Select",
-                                                onClick = { onSelect(distro) }
+                                                label = DOWNLOAD,
+                                                onClick = {
+                                                    onSelect(
+                                                        Screen.BlueprintScreen.Download(
+                                                            name = distro.name,
+                                                            edition = edition.name
+                                                        )
+                                                    )
+                                                }
                                             )
                                         }
                                     )
@@ -129,11 +159,10 @@ private fun DistroListView(
                 title = "Other"
             ) {
                 val fileSelector = kodeinViewModel<FileSelectViewModel>()
-                var selectedIso by remember { mutableStateOf<File?>(null) }
 
                 ActionRow(
-                    title = "Unsure what to pick?",
-                    subtitle = "Try them out online",
+                    title = UNSURE_TITLE,
+                    subtitle = UNSURE_TEXT,
                     suffix = {
                         LinkButton(
                             modifier = Modifier.alignVertical(Align.CENTER),
@@ -143,16 +172,18 @@ private fun DistroListView(
                     }
                 )
                 ActionRow(
-                    title = "Select local ISO",
-                    subtitle = selectedIso?.getPath()?.ifBlank { null } ?: "Bring your own distribution",
+                    title = LOCAL_TITLE,
+                    subtitle = LOCAL_TEXT,
                     suffix = {
                         val currentWindow = LocalWindow.current
 
                         Button(
                             modifier = Modifier.alignVertical(Align.CENTER),
-                            label = "Browse",
+                            label = BROWSE,
                             onClick = {
-                                fileSelector.selectISO(currentWindow) { selectedIso = it }
+                                fileSelector.selectISO(currentWindow) { file ->
+                                    file?.let { onLocalSelect(it) }
+                                }
                             }
                         )
                     }

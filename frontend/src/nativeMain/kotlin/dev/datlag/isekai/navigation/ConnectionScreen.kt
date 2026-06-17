@@ -6,14 +6,13 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import dev.datlag.isekai.Symbols
 import dev.datlag.isekai.ipc.ConnectionState
-import dev.datlag.isekai.module.tr
 import dev.datlag.isekai.navigation.component.DefaultScreen
+import dev.datlag.isekai.translation.Connection
 import dev.datlag.isekai.viewmodel.ConnectionViewModel
 import dev.datlag.isekai.viewmodel.kodeinViewModel
 import dev.datlag.kommons.adwaita.compose.component.ButtonContent
 import dev.datlag.kommons.adwaita.compose.component.StatusPage
 import dev.datlag.kommons.gtk.compose.component.Button
-import dev.datlag.kommons.gtk.compose.component.Text
 import dev.datlag.kommons.gtk.compose.modifier.Modifier
 import dev.datlag.kommons.gtk.compose.modifier.css
 import dev.datlag.kommons.gtk.compose.modifier.fillMaxSize
@@ -25,7 +24,7 @@ import kotlin.time.Duration.Companion.seconds
 @Composable
 fun ConnectionScreen(
     onConnected: () -> Unit
-) = DefaultScreen {
+) = DefaultScreen(Connection) {
     val viewModel = kodeinViewModel<ConnectionViewModel>(dispatcher = Dispatchers.IO)
     val connectionState by viewModel.connectionState.collectAsState()
 
@@ -49,16 +48,16 @@ fun ConnectionScreen(
             is ConnectionState.Error -> Symbols.NETWORK_ERROR
         },
         title = when (connectionState) {
-            is ConnectionState.Connecting -> tr("connection_connecting_title", "Connecting")
-            is ConnectionState.Connected -> tr("connection_connected_title", "Connected")
-            is ConnectionState.Disconnected -> tr("connection_disconnected_title", "Disconnected")
-            is ConnectionState.Error -> tr("connection_error_title", "Connection Error")
+            is ConnectionState.Connecting -> CONNECTING_TITLE
+            is ConnectionState.Connected -> CONNECTED_TITLE
+            is ConnectionState.Disconnected -> DISCONNECTED_TITLE
+            is ConnectionState.Error -> ERROR_TITLE
         },
         description = when (val current = connectionState) {
-            is ConnectionState.Connecting -> tr("connection_connecting_text", "Establishing a secure connection to the background service.")
-            is ConnectionState.Connected -> tr("connection_connected_text", "Connection established successfully.")
-            is ConnectionState.Disconnected -> tr("connection_disconnected_text", "The connection to the background service was lost.")
-            is ConnectionState.Error -> tr("connection_error_text", "An error occurred: ") + current.error.toString()
+            is ConnectionState.Connecting -> CONNECTING_TEXT
+            is ConnectionState.Connected -> CONNECTED_TEXT
+            is ConnectionState.Disconnected -> DISCONNECTED_TEXT
+            is ConnectionState.Error -> errorText(current.error)
         }
     ) {
         if (connectionState is ConnectionState.Error) {
@@ -69,7 +68,7 @@ fun ConnectionScreen(
                     viewModel.connect()
                 }
             ) {
-                ButtonContent(label = tr("connection_retry", "Retry"), iconName = "object-rotate-left-symbolic")
+                ButtonContent(label = RETRY, iconName = "object-rotate-left-symbolic")
             }
         }
     }

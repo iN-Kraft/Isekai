@@ -1,37 +1,19 @@
 package dev.datlag.isekai
 
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import dev.datlag.isekai.module.AppModule
 import dev.datlag.isekai.module.DaemonLauncher
-import dev.datlag.isekai.module.Translator
-import dev.datlag.isekai.module.tr
+import dev.datlag.isekai.translation.Translator
 import dev.datlag.isekai.navigation.BlueprintScreen
 import dev.datlag.isekai.navigation.ConnectionScreen
-import dev.datlag.isekai.navigation.HomeScreen
 import dev.datlag.isekai.navigation.IntroductionScreen
 import dev.datlag.isekai.navigation.NavBackStack
 import dev.datlag.isekai.navigation.NavHost
-import dev.datlag.isekai.navigation.OSSelectionScreen
+import dev.datlag.isekai.navigation.DistroSelectionScreen
 import dev.datlag.isekai.navigation.Screen
-import dev.datlag.isekai.navigation.SystemCheckScreen
 import dev.datlag.isekai.navigation.component.LocalAppName
 import dev.datlag.kommons.adwaita.compose.adwaitaApplication
-import dev.datlag.kommons.adwaita.compose.component.AboutDialog
-import dev.datlag.kommons.adwaita.compose.component.Scaffold
-import dev.datlag.kommons.adwaita.compose.component.TopAppBar
-import dev.datlag.kommons.adwaita.compose.component.WindowTitle
-import dev.datlag.kommons.gtk.License
-import dev.datlag.kommons.gtk.compose.component.Button
-import dev.datlag.kommons.gtk.compose.component.IconName
-import dev.datlag.kommons.gtk.compose.component.Image
-import dev.datlag.kommons.gtk.compose.modifier.Modifier
-import dev.datlag.kommons.gtk.compose.modifier.css
-import dev.datlag.kommons.gtk.compose.modifier.fillMaxSize
-import dev.datlag.kommons.gtk.compose.modifier.fillMaxWidth
 import dev.datlag.kommons.gtk.glib.GLib
 import org.kodein.di.DI
 import org.kodein.di.bindSingleton
@@ -53,7 +35,7 @@ fun main(args: Array<String>) {
     }
     Translator.initialize()
 
-    val appName = tr("app_name", "Project Isekai")
+    val appName = Translator.translate("app_name", "Project Isekai")
     GLib.setApplicationName(appName)
     GLib.setPrgname("Project Isekai") // Do not localize
 
@@ -75,25 +57,16 @@ fun main(args: Array<String>) {
                     }
                     is Screen.Connection -> {
                         ConnectionScreen(
-                            onConnected = { backStack.replaceAll(Screen.SystemCheck) }
+                            onConnected = { backStack.replaceAll(Screen.DistroSelection) }
                         )
                     }
-                    is Screen.SystemCheck -> {
-                        SystemCheckScreen(
-                            onReady = { backStack.replaceAll(Screen.OSSelection) }
-                        )
-                    }
-                    is Screen.OSSelection -> {
-                        OSSelectionScreen(
-                            onSelected = { backStack.push(Screen.BlueprintScreen) },
-                            onLocalSelected = {}
+                    is Screen.DistroSelection -> {
+                        DistroSelectionScreen(
+                            onSelected = { screen -> backStack.push(screen) },
                         )
                     }
                     is Screen.BlueprintScreen -> {
-                        BlueprintScreen(onBack = { backStack.pop() })
-                    }
-                    is Screen.Home -> {
-                        HomeScreen()
+                        BlueprintScreen(config = currentScreen, onBack = { backStack.pop() })
                     }
                 }
             }

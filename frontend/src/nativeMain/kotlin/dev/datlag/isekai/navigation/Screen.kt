@@ -12,14 +12,20 @@ sealed interface Screen : NavKey {
     data object Connection : Screen
 
     @Serializable
-    data object SystemCheck : Screen
+    data object DistroSelection : Screen
 
     @Serializable
-    data object OSSelection : Screen
+    sealed interface BlueprintScreen : Screen {
 
-    @Serializable
-    data object BlueprintScreen : Screen
+        @Serializable
+        data class LocalFile(
+            val filePath: String
+        ) : BlueprintScreen
 
-    @Serializable
-    data object Home : Screen
+        @Serializable
+        data class Download(
+            val name: String,
+            val edition: String?
+        ) : BlueprintScreen
+    }
 }

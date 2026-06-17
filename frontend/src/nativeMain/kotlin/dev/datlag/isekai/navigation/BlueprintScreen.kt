@@ -39,6 +39,7 @@ import kotlinx.coroutines.IO
 
 @Composable
 fun BlueprintScreen(
+    config: Screen.BlueprintScreen,
     onBack: () -> Unit
 ) {
     val diskViewModel = kodeinViewModel<DiskViewModel>(dispatcher = Dispatchers.IO)
@@ -50,10 +51,11 @@ fun BlueprintScreen(
     var selectedPartitionIndex by remember(partitions) {
         mutableStateOf(0)
     }
-    var isBitLockerActive by remember(partitions, selectedPartitionIndex) {
-        mutableStateOf(partitions.getOrNull(selectedPartitionIndex)?.let {
-            it.bitlockerState != BitLockerState.Unprotected
-        } ?: false)
+    val bitlockerState = remember(partitions, selectedPartitionIndex) {
+        partitions.getOrNull(selectedPartitionIndex)?.bitlockerState ?: BitLockerState.Unprotected
+    }
+    var isBitLockerActive by remember(bitlockerState) {
+        mutableStateOf(bitlockerState != BitLockerState.Unprotected)
     }
 
     LaunchedEffect(Unit) {
@@ -94,9 +96,17 @@ fun BlueprintScreen(
             )
 
             Banner(
-                title = "BitLocker encryption detected on selected drive.",
+                title = when (bitlockerState) {
+                    BitLockerState.Locked -> "Drive is locked with BitLocker."
+                    BitLockerState.Protected -> "Drive is protected on reboot."
+                    BitLockerState.Unprotected -> ""
+                },
                 revealed = isBitLockerActive,
-                buttonLabel = "Unlock Drive",
+                buttonLabel = when (bitlockerState) {
+                    BitLockerState.Locked -> "Unlock"
+                    BitLockerState.Protected -> "Suspend"
+                    BitLockerState.Unprotected -> null
+                },
                 buttonStyle = BannerButtonStyle.SUGGESTED,
                 onButtonClicked = {
                     isBitLockerActive = false
@@ -161,14 +171,27 @@ fun BlueprintScreen(
                             Image(iconName = IconName("computer-symbolic"))
                         },
                         title = "Selected System",
-                        subtitle = "Fedora",
+                        subtitle = when (config) {
+                            is Screen.BlueprintScreen.LocalFile -> {
+                                config.filePath
+                            }
+                            is Screen.BlueprintScreen.Download -> {
+                                if (config.edition.isNullOrBlank()) {
+                                    config.name
+                                } else {
+                                    "${config.name} - ${config.edition}"
+                                }
+                            }
+                        },
                     )
-                    SwitchRow(
-                        title = "Delete ISO",
-                        subtitle = "Automatically delete the downloaded ISO after installation?",
-                        active = delete,
-                        onActiveChanged = { delete = it }
-                    )
+                    if (config is Screen.BlueprintScreen.Download) {
+                        SwitchRow(
+                            title = "Delete ISO",
+                            subtitle = "Automatically delete the downloaded ISO after installation?",
+                            active = delete,
+                            onActiveChanged = { delete = it }
+                        )
+                    }
                 }
             }
         }

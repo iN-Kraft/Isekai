@@ -1,35 +1,25 @@
 package dev.datlag.isekai.navigation
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.ComposeNode
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import dev.datlag.isekai.ipc.ConnectionState
-import dev.datlag.isekai.module.tr
 import dev.datlag.isekai.navigation.component.DefaultScreen
 import dev.datlag.isekai.navigation.model.IntroSlide
+import dev.datlag.isekai.translation.Introduction
 import dev.datlag.isekai.viewmodel.ConnectionViewModel
 import dev.datlag.isekai.viewmodel.SystemViewModel
 import dev.datlag.isekai.viewmodel.kodeinViewModel
-import dev.datlag.kommons.adwaita.CarouselIndicatorDots
 import dev.datlag.kommons.adwaita.compose.component.ButtonContent
-import dev.datlag.kommons.adwaita.compose.component.CarouselIndicatorDots
-import dev.datlag.kommons.adwaita.compose.component.CarouselIndicatorDotsNode
-import dev.datlag.kommons.adwaita.compose.component.CarouselState
 import dev.datlag.kommons.adwaita.compose.component.StatusPage
-import dev.datlag.kommons.adwaita.compose.component.rememberCarouselState
-import dev.datlag.kommons.gtk.compose.GtkApplier
 import dev.datlag.kommons.gtk.compose.component.Box
 import dev.datlag.kommons.gtk.compose.component.Button
 import dev.datlag.kommons.gtk.compose.component.Column
 import dev.datlag.kommons.gtk.compose.component.HorizontalDivider
 import dev.datlag.kommons.gtk.compose.component.Row
-import dev.datlag.kommons.gtk.compose.component.SeparatorNode
-import dev.datlag.kommons.gtk.compose.component.Text
 import dev.datlag.kommons.gtk.compose.modifier.Modifier
 import dev.datlag.kommons.gtk.compose.modifier.css
 import dev.datlag.kommons.gtk.compose.modifier.fillMaxSize
@@ -42,24 +32,17 @@ import kotlinx.coroutines.IO
 @Composable
 fun IntroductionScreen(
     onNavigateNext: (Screen) -> Unit
-) = DefaultScreen {
+) = DefaultScreen(translation = Introduction) {
     val connectionViewModel = kodeinViewModel<ConnectionViewModel>(dispatcher = Dispatchers.IO)
-    val systemViewModel = kodeinViewModel<SystemViewModel>(dispatcher = Dispatchers.IO)
-    
     val connectionState by connectionViewModel.connectionState.collectAsState()
-    val report by systemViewModel.systemReport.collectAsState()
 
     var currentPage by remember { mutableIntStateOf(0) }
     val isLastPage = currentPage == IntroSlide.collection.lastIndex
 
     val onStartAction = {
         when (connectionState) {
-            is ConnectionState.Connected if report?.isReady == true -> {
-                onNavigateNext(Screen.Home)
-            }
-
             is ConnectionState.Connected -> {
-                onNavigateNext(Screen.SystemCheck)
+                onNavigateNext(Screen.DistroSelection)
             }
 
             else -> {
@@ -98,7 +81,7 @@ fun IntroductionScreen(
                     onClick = {
                         currentPage = IntroSlide.collection.lastIndex
                     },
-                    label = tr("intro_skip", "Skip")
+                    label = SKIP
                 )
             } else {
                 Box(modifier = Modifier.size(width = 80)) {}
@@ -114,12 +97,12 @@ fun IntroductionScreen(
             ) {
                 if (isLastPage) {
                     ButtonContent(
-                        label = tr("intro_start", "Start"),
+                        label = START,
                         iconName = "media-playback-start-symbolic"
                     )
                 } else {
                     ButtonContent(
-                        label = tr("intro_next", "Next"),
+                        label = NEXT,
                         iconName = "go-next-symbolic"
                     )
                 }
