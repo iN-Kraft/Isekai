@@ -19,7 +19,8 @@ sealed interface Screen : NavKey {
 
         @Serializable
         data class LocalFile(
-            val filePath: String
+            val filePath: String,
+            val fileSize: ULong
         ) : BlueprintScreen
 
         @Serializable

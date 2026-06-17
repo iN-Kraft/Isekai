@@ -12,6 +12,7 @@ import dev.datlag.isekai.viewmodel.FileSelectViewModel
 import dev.datlag.isekai.viewmodel.kodeinViewModel
 import dev.datlag.kommons.adwaita.ViewSwitcherPolicy
 import dev.datlag.kommons.adwaita.compose.component.ActionRow
+import dev.datlag.kommons.adwaita.compose.component.ButtonContent
 import dev.datlag.kommons.adwaita.compose.component.Clamp
 import dev.datlag.kommons.adwaita.compose.component.ExpanderRow
 import dev.datlag.kommons.adwaita.compose.component.PreferencesGroup
@@ -30,6 +31,9 @@ import dev.datlag.kommons.gtk.compose.modifier.alignVertical
 import dev.datlag.kommons.gtk.compose.modifier.css
 import dev.datlag.kommons.gtk.compose.modifier.fillMaxSize
 import dev.datlag.kommons.gtk.gio.File
+import dev.datlag.kommons.gtk.gio.FileInfo
+import dev.datlag.kommons.gtk.gio.FileMeasureFlags
+import dev.datlag.kommons.gtk.gio.measureDiskUsage
 
 @Composable
 fun DistroSelectionScreen(
@@ -59,11 +63,14 @@ fun DistroSelectionScreen(
                         onSelect = onSelected,
                         onLocalSelect = { file ->
                             val filePath = file.peekPath()?.ifBlank { null } ?: file.getPath()?.ifBlank { null }
+                            val fileSize = file.measureDiskUsage(FileMeasureFlags.NONE, null, null) { _, size, _, _ ->
+                                size
+                            }.getOrNull() ?: 0uL
 
                             if (filePath.isNullOrBlank()) {
                                 snackbarHostState.showSnackbar(title = "Could not resolve path for: ${file.getBasename()}")
                             } else {
-                                onSelected(Screen.BlueprintScreen.LocalFile(filePath))
+                                onSelected(Screen.BlueprintScreen.LocalFile(filePath, fileSize))
                             }
                         }
                     )
@@ -79,11 +86,14 @@ fun DistroSelectionScreen(
                         onSelect = onSelected,
                         onLocalSelect = { file ->
                             val filePath = file.peekPath()?.ifBlank { null } ?: file.getPath()?.ifBlank { null }
+                            val fileSize = file.measureDiskUsage(FileMeasureFlags.NONE, null, null) { _, size, _, _ ->
+                                size
+                            }.getOrNull() ?: 0uL
 
                             if (filePath.isNullOrBlank()) {
                                 snackbarHostState.showSnackbar(title = "Could not resolve path for: ${file.getBasename()}")
                             } else {
-                                onSelected(Screen.BlueprintScreen.LocalFile(filePath))
+                                onSelected(Screen.BlueprintScreen.LocalFile(filePath, fileSize))
                             }
                         }
                     )
@@ -113,7 +123,6 @@ private fun DistroListView(
                                 suffix = {
                                     Button(
                                         modifier = Modifier.css("suggested-action").alignVertical(Align.CENTER),
-                                        label = DOWNLOAD,
                                         onClick = {
                                             onSelect(
                                                 Screen.BlueprintScreen.Download(
@@ -122,7 +131,9 @@ private fun DistroListView(
                                                 )
                                             )
                                         }
-                                    )
+                                    ) {
+                                        ButtonContent(label = DOWNLOAD, iconName = "folder-download-symbolic")
+                                    }
                                 }
                             )
                         } else {
@@ -137,7 +148,6 @@ private fun DistroListView(
                                         suffix = {
                                             Button(
                                                 modifier = Modifier.css("suggested-action").alignVertical(Align.CENTER),
-                                                label = DOWNLOAD,
                                                 onClick = {
                                                     onSelect(
                                                         Screen.BlueprintScreen.Download(
@@ -146,7 +156,9 @@ private fun DistroListView(
                                                         )
                                                     )
                                                 }
-                                            )
+                                            ) {
+                                                ButtonContent(label = DOWNLOAD, iconName = "folder-download-symbolic")
+                                            }
                                         }
                                     )
                                 }
@@ -179,13 +191,14 @@ private fun DistroListView(
 
                         Button(
                             modifier = Modifier.alignVertical(Align.CENTER),
-                            label = BROWSE,
                             onClick = {
                                 fileSelector.selectISO(currentWindow) { file ->
                                     file?.let { onLocalSelect(it) }
                                 }
                             }
-                        )
+                        ) {
+                            ButtonContent(label = BROWSE, iconName = "folder-open-symbolic")
+                        }
                     }
                 )
             }
