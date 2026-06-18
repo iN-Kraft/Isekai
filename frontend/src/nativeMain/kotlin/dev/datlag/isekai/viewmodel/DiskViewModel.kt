@@ -9,7 +9,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import org.kodein.di.DI
 import org.kodein.di.DirectDI
 import org.kodein.di.instance
@@ -21,66 +24,169 @@ class DiskViewModel(
 
     private val repository: DiskRepository = instance()
 
-    private val _disks = MutableStateFlow<List<Disk>>(emptyList())
-    val disks = _disks.asStateFlow()
-
-    private val _isLoading = MutableStateFlow(false)
-    val isLoading = _isLoading.asStateFlow()
-
-    private val _error = MutableStateFlow<String?>(null)
-    val error = _error.asStateFlow()
-
-    private val _hardwareTick = MutableStateFlow(0)
-    val hardwareTick = _hardwareTick.asStateFlow()
+    private val _state = MutableStateFlow<State>(State())
+    val state = _state.asStateFlow()
 
     init {
+        loadData()
+
         viewModelScope.launch {
             repository.events.collect { event ->
                 if (event.message == "HardwareChanged") {
-                    loadDisks()
+                    loadData()
                 }
             }
         }
     }
 
-    fun loadDisks() {
+    private fun loadData() {
         viewModelScope.launch {
-            _isLoading.update { true }
-            _error.update { null }
+            val currentLoading = _state.updateAndGet { current ->
+                current.copy(
+                    diskState = current.diskState.copy(isLoading = true),
+                    partitionState = current.partitionState.copy(isLoading = true)
+                )
+            }
 
-            fold(
-                block = { repository.getDisks() },
-                catch = { e ->
-                    _error.update { e.message ?: "An unexpected error occurred" }
-                    _isLoading.update { false }
-                },
-                recover = { err: IPCError ->
-                    _error.update { "Failed to load disks: $err" }
-                    _isLoading.update { false }
-                },
-                transform = { loadedDisks ->
-                    _disks.update { loadedDisks }
-                    _isLoading.update { false }
-                    _hardwareTick.update { it + 1 }
-                }
-            )
+            val newDiskState = getDiskState(currentLoading.diskState)
+            val newPartitionState = getPartitionState(newDiskState.selectedDisk, currentLoading.partitionState)
+
+            _state.update { current ->
+                current.copy(
+                    diskState = newDiskState,
+                    partitionState = newPartitionState
+                )
+            }
         }
     }
 
-    suspend fun loadPartitions(disk: Disk): List<Partition> {
+    fun selectDisk(disk: Disk?) {
+        if (state.value.diskState.selectedId == disk?.stableId) {
+            return
+        }
+
+        viewModelScope.launch {
+            val currentLoading = _state.updateAndGet { current ->
+                current.copy(
+                    diskState = current.diskState.copy(selectedId = disk?.stableId),
+                    partitionState = current.partitionState.copy(isLoading = true, selectedId = null)
+                )
+            }
+
+            val newPartitionState = getPartitionState(disk, currentLoading.partitionState)
+            _state.update { current ->
+                current.copy(
+                    partitionState = newPartitionState
+                )
+            }
+        }
+    }
+
+    private suspend fun getDiskState(current: State.DiskState = state.value.diskState): State.DiskState {
+        return fold(
+            block = { repository.getDisks() },
+            catch = { e ->
+                e.printStackTrace()
+
+                State.DiskState(
+                    isLoading = false,
+                    disks = emptyList(),
+                    selectedId = null
+                )
+            },
+            recover = { err: IPCError ->
+                println(err)
+
+                State.DiskState(
+                    isLoading = false,
+                    disks = emptyList(),
+                    selectedId = null
+                )
+            },
+            transform = { disks ->
+                State.DiskState(
+                    isLoading = false,
+                    disks = disks,
+                    selectedId = current.selectedId?.ifBlank { null }?.let {
+                        if (disks.any { d -> d.stableId == it }) {
+                            it
+                        } else {
+                            null
+                        }
+                    }
+                )
+            }
+        )
+    }
+
+    private suspend fun getPartitionState(disk: Disk?, current: State.PartitionState): State.PartitionState {
+        if (disk == null) {
+            return State.PartitionState(
+                isLoading = true,
+                partitions = emptyList()
+            )
+        }
+
         return fold(
             block = { repository.getPartitions(disk.stableId) },
             catch = { e ->
                 e.printStackTrace()
-                emptyList()
+
+                State.PartitionState(
+                    isLoading = false,
+                    partitions = emptyList(),
+                    selectedId = null
+                )
             },
             recover = { err: IPCError ->
                 println(err)
-                emptyList()
+
+                State.PartitionState(
+                    isLoading = false,
+                    partitions = emptyList(),
+                    selectedId = null
+                )
             },
             transform = { parts ->
-                parts
+                State.PartitionState(
+                    isLoading = false,
+                    partitions = parts,
+                    selectedId = current.selectedId?.ifBlank { null }?.let {
+                        if (parts.any { p -> p.id == it }) {
+                            it
+                        } else {
+                            null
+                        }
+                    }
+                )
             }
+        )
+    }
+
+    @Serializable
+    data class State(
+        val diskState: DiskState = DiskState(),
+        val partitionState: PartitionState = PartitionState()
+    ) {
+        @Serializable
+        data class DiskState(
+            val isLoading: Boolean = true,
+            val disks: List<Disk> = emptyList(),
+            val selectedId: String? = null
+        ) {
+            val selectedDisk: Disk?
+                get() = if (selectedId.isNullOrBlank()) {
+                    null
+                } else {
+                    disks.firstOrNull { it.stableId == selectedId }
+                }
+        }
+
+        @Serializable
+        data class PartitionState(
+            val isLoading: Boolean = true,
+            val partitions: List<Partition> = emptyList(),
+            val selectedId: String? = null
         )
     }
 }

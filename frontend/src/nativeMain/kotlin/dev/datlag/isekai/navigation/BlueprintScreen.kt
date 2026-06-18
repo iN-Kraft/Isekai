@@ -51,40 +51,32 @@ fun BlueprintScreen(
     onBack: () -> Unit
 ) {
     val diskViewModel = kodeinViewModel<DiskViewModel>(dispatcher = Dispatchers.IO)
-    val disks by diskViewModel.disks.collectAsState()
+    val state by diskViewModel.state.collectAsState()
 
-    val hardwareTick by diskViewModel.hardwareTick.collectAsState()
-
-    LaunchedEffect(Unit) {
-        diskViewModel.loadDisks()
+    val selectedDiskIndex = remember(state.diskState.disks, state.diskState.selectedId) {
+        val index = state.diskState.disks.indexOfFirst { it.stableId == state.diskState.selectedId }
+        if (index >= 0) index else 0
     }
 
-    var selectedDiskIndex by remember { mutableStateOf(0) }
-    var partitions by remember(disks, selectedDiskIndex, hardwareTick) {
-        mutableStateOf(emptyList<Partition>())
+    var selectedPartitionIndex = remember(state.partitionState.partitions, state.partitionState.selectedId) {
+        val index = state.partitionState.partitions.indexOfFirst { it.id == state.partitionState.selectedId }
+        if (index >= 0) index else 0
     }
-    var selectedPartitionIndex by remember(partitions) {
-        mutableStateOf(0)
-    }
-    val bitlockerState = remember(partitions, selectedPartitionIndex) {
-        partitions.getOrNull(selectedPartitionIndex)?.bitlockerState ?: BitLockerState.Unprotected
+    val bitlockerState = remember(state.partitionState.partitions, selectedPartitionIndex) {
+        state.partitionState.partitions.getOrNull(selectedPartitionIndex)?.bitlockerState ?: BitLockerState.Unprotected
     }
     var isBitLockerActive by remember(bitlockerState) {
         mutableStateOf(bitlockerState != BitLockerState.Unprotected)
     }
 
-    LaunchedEffect(disks, selectedDiskIndex, hardwareTick) {
-        partitions = disks.getOrNull(selectedDiskIndex)?.let { diskViewModel.loadPartitions(it) }.orEmpty()
-    }
-
-    val diskModel = remember(disks) {
-        StringList(disks.map { disk ->
+    val diskModel = remember(state.diskState.disks) {
+        StringList(state.diskState.disks.map { disk ->
             "${disk.name} - ${disk.totalGb}GB"
         })
     }
 
-    val partitionModel = remember(partitions) {
-        StringList(partitions.map { part ->
+    val partitionModel = remember(state.partitionState.partitions) {
+        StringList(state.partitionState.partitions.map { part ->
             val driveDisplay = part.driveLetter ?: "Volume"
             "$driveDisplay (${part.fileSystem}) - ${part.sizeGb}GB"
         })
@@ -133,7 +125,7 @@ fun BlueprintScreen(
                     title = "Destination Drive",
                     description = "This will be resized to make room for Linux."
                 ) {
-                    if (disks.isEmpty()) {
+                    if (state.diskState.isLoading) {
                         ActionRow(
                             title = "Target Drive",
                             subtitle = "Checking for available drives",
@@ -146,12 +138,12 @@ fun BlueprintScreen(
                             model = diskModel,
                             selected = selectedDiskIndex,
                             onSelectedChange = {
-                                selectedDiskIndex = it
+                                diskViewModel.selectDisk(state.diskState.disks.getOrNull(it))
                             },
                             enableSearch = false
                         )
                     }
-                    if (partitions.isEmpty()) {
+                    if (state.partitionState.isLoading) {
                         ActionRow(
                             title = "Partition",
                             subtitle = "Checking for available partitions",
@@ -229,7 +221,7 @@ fun BlueprintScreen(
                     ButtonRow(
                         modifier = Modifier.css("suggested-action"),
                         title = when (config) {
-                            is Screen.BlueprintScreen.Download -> "Download & Install"
+                            is Screen.BlueprintScreen.Download -> "Download and Install"
                             is Screen.BlueprintScreen.LocalFile -> "Install"
                         },
                         startIconName = "system-software-install-symbolic",
