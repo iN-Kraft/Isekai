@@ -87,7 +87,7 @@ impl BitLocker {
         let output = tokio::process::Command::new("manage-bde.exe")
             .kill_on_drop(true)
             .no_window()
-            .args(["-protectors", "-disable", letter, "-RebootCount", "1"])
+            .args(["-protectors", "-disable", letter])
             .output()
             .await
             .map_err(DiskError::OsError)?;

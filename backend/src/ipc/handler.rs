@@ -81,10 +81,26 @@ pub async fn process_request(
             }
         }
 
-        IpcProtocol::UnlockBitLocker { drive_letter } => {
+        IpcProtocol::UnlockBitlocker { drive_letter } => {
             telemetry!(info, "Waiting for user to unlock BitLocker.");
 
             match BitLocker::prompt_unlock(&drive_letter).await {
+                Ok(_) => {
+                    IpcResponse {
+                        id: req.id.clone(),
+                        success: true,
+                        data: Some(ResponseData::Empty),
+                        error: None
+                    }
+                }
+                Err(e) => build_error(&req.id, e.to_string())
+            }
+        }
+
+        IpcProtocol::SuspendBitlocker { drive_letter } => {
+            telemetry!(info, "Suspending Bitlocker for drive {}", drive_letter);
+
+            match BitLocker::suspend(&drive_letter).await {
                 Ok(_) => {
                     IpcResponse {
                         id: req.id.clone(),

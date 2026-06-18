@@ -20,4 +20,12 @@ class DiskRepository(private val transport: IPCTransport) {
     context(_: Raise<IPCError>)
     suspend fun getPartitions(diskId: String): List<Partition> =
         transport.execute { IpcRequest.GetPartitions(it, diskId) }
+
+    context(_: Raise<IPCError>)
+    suspend fun unlockBitlocker(driveLetter: String): Unit =
+        transport.execute { IpcRequest.UnlockBitlocker(it, driveLetter) }
+
+    context(_: Raise<IPCError>)
+    suspend fun suspendBitlocker(driveLetter: String): Unit =
+        transport.execute { IpcRequest.SuspendBitlocker(it, driveLetter) }
 }

@@ -11,7 +11,8 @@ pub enum IpcProtocol {
     GetDisks,
     GetPartitions { disk_id: String },
     ShrinkPartition { disk_id: String, partition_id: String, target_size_gb: u32 },
-    UnlockBitLocker { drive_letter: String }
+    UnlockBitlocker { drive_letter: String },
+    SuspendBitlocker { drive_letter: String }
 }
 
 #[derive(Deserialize, Debug)]

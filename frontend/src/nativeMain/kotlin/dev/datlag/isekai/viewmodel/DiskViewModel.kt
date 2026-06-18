@@ -69,7 +69,7 @@ class DiskViewModel(
             val currentLoading = _state.updateAndGet { current ->
                 current.copy(
                     diskState = current.diskState.copy(selectedId = disk?.stableId),
-                    partitionState = current.partitionState.copy(isLoading = true, selectedId = null)
+                    partitionState = current.partitionState.copy(isLoading = true, selectedLetter = null)
                 )
             }
 
@@ -77,6 +77,85 @@ class DiskViewModel(
             _state.update { current ->
                 current.copy(
                     partitionState = newPartitionState
+                )
+            }
+        }
+    }
+
+    fun selectDisk(index: Int) {
+        selectDisk(state.value.diskState.disks.getOrNull(index))
+    }
+
+    fun selectPartition(partition: Partition?) {
+        if (state.value.partitionState.selectedPartition == partition) {
+            return
+        }
+
+        _state.update { current ->
+            current.copy(
+                partitionState = current.partitionState.copy(
+                    selectedLetter = partition?.driveLetter,
+                    selectedId = partition?.id
+                )
+            )
+        }
+    }
+
+    fun selectPartition(index: Int) {
+        selectPartition(state.value.partitionState.partitions.getOrNull(index))
+    }
+
+    fun unlockBitlocker(partition: Partition? = state.value.partitionState.selectedPartition) {
+        val driveLetter = partition?.driveLetter ?: return
+        val driveId = partition.id
+
+        viewModelScope.launch {
+            fold(
+                block = { repository.unlockBitlocker(driveLetter) },
+                catch = { e ->
+                    e.printStackTrace()
+                },
+                recover = { err: IPCError ->
+                    println(err)
+                },
+                transform = { }
+            )
+
+            val newPartitionState = getPartitionState()
+            _state.update { current ->
+                current.copy(
+                    partitionState = newPartitionState.copy(
+                        selectedLetter = driveLetter,
+                        selectedId = driveId
+                    )
+                )
+            }
+        }
+    }
+
+    fun suspendBitlocker(partition: Partition? = state.value.partitionState.selectedPartition) {
+        val driveLetter = partition?.driveLetter ?: return
+        val driveId = partition.id
+
+        viewModelScope.launch {
+            fold(
+                block = { repository.suspendBitlocker(driveLetter) },
+                catch = { e ->
+                    e.printStackTrace()
+                },
+                recover = { err: IPCError ->
+                    println(err)
+                },
+                transform = { }
+            )
+
+            val newPartitionState = getPartitionState()
+            _state.update { current ->
+                current.copy(
+                    partitionState = newPartitionState.copy(
+                        selectedLetter = driveLetter,
+                        selectedId = driveId
+                    )
                 )
             }
         }
@@ -107,19 +186,16 @@ class DiskViewModel(
                 State.DiskState(
                     isLoading = false,
                     disks = disks,
-                    selectedId = current.selectedId?.ifBlank { null }?.let {
-                        if (disks.any { d -> d.stableId == it }) {
-                            it
-                        } else {
-                            null
-                        }
-                    }
+                    selectedId = current.selectedId
                 )
             }
         )
     }
 
-    private suspend fun getPartitionState(disk: Disk?, current: State.PartitionState): State.PartitionState {
+    private suspend fun getPartitionState(
+        disk: Disk? = state.value.diskState.selectedDisk,
+        current: State.PartitionState = state.value.partitionState
+    ): State.PartitionState {
         if (disk == null) {
             return State.PartitionState(
                 isLoading = true,
@@ -135,6 +211,7 @@ class DiskViewModel(
                 State.PartitionState(
                     isLoading = false,
                     partitions = emptyList(),
+                    selectedLetter = null,
                     selectedId = null
                 )
             },
@@ -144,6 +221,7 @@ class DiskViewModel(
                 State.PartitionState(
                     isLoading = false,
                     partitions = emptyList(),
+                    selectedLetter = null,
                     selectedId = null
                 )
             },
@@ -151,13 +229,8 @@ class DiskViewModel(
                 State.PartitionState(
                     isLoading = false,
                     partitions = parts,
-                    selectedId = current.selectedId?.ifBlank { null }?.let {
-                        if (parts.any { p -> p.id == it }) {
-                            it
-                        } else {
-                            null
-                        }
-                    }
+                    selectedLetter = current.selectedLetter,
+                    selectedId = current.selectedId
                 )
             }
         )
@@ -180,13 +253,43 @@ class DiskViewModel(
                 } else {
                     disks.firstOrNull { it.stableId == selectedId }
                 }
+
+            val selectedIndex: Int?
+                get() = if (selectedId.isNullOrBlank()) {
+                    null
+                } else {
+                    disks.indexOfFirst { it.stableId == selectedId }.takeIf { it >= 0 }
+                }
         }
 
         @Serializable
         data class PartitionState(
             val isLoading: Boolean = true,
             val partitions: List<Partition> = emptyList(),
+            val selectedLetter: String? = null,
             val selectedId: String? = null
-        )
+        ) {
+            val selectedPartition: Partition?
+                get() = if (selectedLetter.isNullOrBlank()) {
+                    if (selectedId.isNullOrBlank()) {
+                        null
+                    } else {
+                        partitions.firstOrNull { it.id == selectedId }
+                    }
+                } else {
+                    partitions.firstOrNull { it.driveLetter == selectedLetter }
+                }
+
+            val selectedIndex: Int?
+                get() = if (selectedLetter.isNullOrBlank()) {
+                    if (selectedId.isNullOrBlank()) {
+                        null
+                    } else {
+                        partitions.indexOfFirst { it.id == selectedId }.takeIf { it >= 0 }
+                    }
+                } else {
+                    partitions.indexOfFirst { it.driveLetter == selectedLetter }.takeIf { it >= 0 }
+                }
+        }
     }
 }

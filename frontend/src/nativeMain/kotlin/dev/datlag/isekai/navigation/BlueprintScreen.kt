@@ -53,14 +53,12 @@ fun BlueprintScreen(
     val diskViewModel = kodeinViewModel<DiskViewModel>(dispatcher = Dispatchers.IO)
     val state by diskViewModel.state.collectAsState()
 
-    val selectedDiskIndex = remember(state.diskState.disks, state.diskState.selectedId) {
-        val index = state.diskState.disks.indexOfFirst { it.stableId == state.diskState.selectedId }
-        if (index >= 0) index else 0
+    val selectedDiskIndex = remember(state.diskState) {
+        state.diskState.selectedIndex ?: 0
     }
 
-    var selectedPartitionIndex = remember(state.partitionState.partitions, state.partitionState.selectedId) {
-        val index = state.partitionState.partitions.indexOfFirst { it.id == state.partitionState.selectedId }
-        if (index >= 0) index else 0
+    val selectedPartitionIndex = remember(state.partitionState.partitions, state.partitionState.selectedLetter) {
+        state.partitionState.selectedIndex ?: 0
     }
     val bitlockerState = remember(state.partitionState.partitions, selectedPartitionIndex) {
         state.partitionState.partitions.getOrNull(selectedPartitionIndex)?.bitlockerState ?: BitLockerState.Unprotected
@@ -112,7 +110,11 @@ fun BlueprintScreen(
                 },
                 buttonStyle = BannerButtonStyle.SUGGESTED,
                 onButtonClicked = {
-                    isBitLockerActive = false
+                    when (bitlockerState) {
+                        BitLockerState.Locked -> diskViewModel.unlockBitlocker()
+                        BitLockerState.Protected -> diskViewModel.suspendBitlocker()
+                        else -> { }
+                    }
                 }
             )
         }
@@ -138,7 +140,7 @@ fun BlueprintScreen(
                             model = diskModel,
                             selected = selectedDiskIndex,
                             onSelectedChange = {
-                                diskViewModel.selectDisk(state.diskState.disks.getOrNull(it))
+                                diskViewModel.selectDisk(it)
                             },
                             enableSearch = false
                         )
@@ -156,7 +158,7 @@ fun BlueprintScreen(
                             model = partitionModel,
                             selected = selectedPartitionIndex,
                             onSelectedChange = {
-                                selectedPartitionIndex = it
+                                diskViewModel.selectPartition(it)
                             },
                             enableSearch = false
                         )
@@ -221,7 +223,7 @@ fun BlueprintScreen(
                     ButtonRow(
                         modifier = Modifier.css("suggested-action"),
                         title = when (config) {
-                            is Screen.BlueprintScreen.Download -> "Download and Install"
+                            is Screen.BlueprintScreen.Download -> "Download &amp; Install"
                             is Screen.BlueprintScreen.LocalFile -> "Install"
                         },
                         startIconName = "system-software-install-symbolic",

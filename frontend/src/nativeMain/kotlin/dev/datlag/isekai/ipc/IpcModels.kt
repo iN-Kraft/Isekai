@@ -35,6 +35,20 @@ sealed class IpcRequest {
         @SerialName("partition_id") val partitionId: String,
         @SerialName("target_size_gb") val targetSizeGb: UInt,
     ) : IpcRequest()
+
+    @Serializable
+    @SerialName("UnlockBitlocker")
+    data class UnlockBitlocker(
+        override val id: String,
+        @SerialName("drive_letter") val driveLetter: String
+    ) : IpcRequest()
+
+    @Serializable
+    @SerialName("SuspendBitlocker")
+    data class SuspendBitlocker(
+        override val id: String,
+        @SerialName("drive_letter") val driveLetter: String
+    ) : IpcRequest()
 }
 
 @Serializable
