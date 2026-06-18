@@ -30,6 +30,19 @@ class DiskViewModel(
     private val _error = MutableStateFlow<String?>(null)
     val error = _error.asStateFlow()
 
+    private val _hardwareTick = MutableStateFlow(0)
+    val hardwareTick = _hardwareTick.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            repository.events.collect { event ->
+                if (event.message == "HardwareChanged") {
+                    loadDisks()
+                }
+            }
+        }
+    }
+
     fun loadDisks() {
         viewModelScope.launch {
             _isLoading.update { true }
@@ -48,6 +61,7 @@ class DiskViewModel(
                 transform = { loadedDisks ->
                     _disks.update { loadedDisks }
                     _isLoading.update { false }
+                    _hardwareTick.update { it + 1 }
                 }
             )
         }

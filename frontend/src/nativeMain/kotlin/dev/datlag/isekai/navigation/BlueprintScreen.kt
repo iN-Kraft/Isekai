@@ -52,8 +52,15 @@ fun BlueprintScreen(
 ) {
     val diskViewModel = kodeinViewModel<DiskViewModel>(dispatcher = Dispatchers.IO)
     val disks by diskViewModel.disks.collectAsState()
+
+    val hardwareTick by diskViewModel.hardwareTick.collectAsState()
+
+    LaunchedEffect(Unit) {
+        diskViewModel.loadDisks()
+    }
+
     var selectedDiskIndex by remember { mutableStateOf(0) }
-    var partitions by remember(disks, selectedDiskIndex) {
+    var partitions by remember(disks, selectedDiskIndex, hardwareTick) {
         mutableStateOf(emptyList<Partition>())
     }
     var selectedPartitionIndex by remember(partitions) {
@@ -66,11 +73,7 @@ fun BlueprintScreen(
         mutableStateOf(bitlockerState != BitLockerState.Unprotected)
     }
 
-    LaunchedEffect(Unit) {
-        diskViewModel.loadDisks()
-    }
-
-    LaunchedEffect(disks, selectedDiskIndex) {
+    LaunchedEffect(disks, selectedDiskIndex, hardwareTick) {
         partitions = disks.getOrNull(selectedDiskIndex)?.let { diskViewModel.loadPartitions(it) }.orEmpty()
     }
 

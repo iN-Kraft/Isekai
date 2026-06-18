@@ -13,6 +13,7 @@ use crate::application::spawn_blocking_with_context;
 use crate::domain::{PARTITION_LABEL_EFI, PARTITION_LABEL_LIVE};
 use crate::infrastructure::CommandExt;
 use crate::infrastructure::windows::bitlocker::BitLocker;
+use crate::ipc::protocol::{IpcEvent, OutgoingMessage};
 use crate::telemetry;
 
 pub struct WindowsDiskManager {
@@ -218,6 +219,39 @@ impl WindowsDiskManager {
         }
 
         Err(DiskError::DataValidation("Failed to parse shrink size from Windows API".into()))
+    }
+
+    pub fn start_hardware_watcher() {
+        spawn_blocking_with_context(move || {
+            let wmi_con = match WMIConnection::with_namespace_path("ROOT\\CIMV2") {
+                Ok(w) => w,
+                Err(e) => {
+                    telemetry!(error, "Failed to connect to WMI for hardware watcher: {}", e);
+                    return;
+                }
+            };
+            let query = "SELECT * FROM Win32_VolumeChangeEvent";
+            let iterator = match wmi_con.exec_notification_query(query) {
+                Ok(i) => i,
+                Err(e) => {
+                    telemetry!(error, "Failed to execute WMI event query: {}", e);
+                    return;
+                }
+            };
+
+            telemetry!(info, "Hardware watcher started. Listening for volume interrupts...");
+
+            for event in iterator {
+                match event {
+                    Ok(_) => {
+                        telemetry!(step, "HardwareChanged");
+                    }
+                    Err(e) => {
+                        telemetry!(error, "WMI watcher event error: {}", e);
+                    }
+                }
+            }
+        });
     }
 }
 

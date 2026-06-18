@@ -19,6 +19,7 @@ use crate::application::{AppContext, APP_CONTEXT};
 use crate::ipc::handler::process_request;
 use crate::ipc::protocol::{IpcRequest, OutgoingMessage};
 use crate::application::state::{AppState, SharedState};
+use crate::infrastructure::windows::WindowsDiskManager;
 
 pub(crate) const PIPE_NAME: &str = r"\\.\pipe\isekai_daemon";
 
@@ -116,6 +117,13 @@ impl IpcServer {
                             }
                         }
                     }
+                });
+
+                let ctx_for_watcher = AppContext::IPC(tx.clone(), state.clone());
+                spawn(async move {
+                    APP_CONTEXT.scope(ctx_for_watcher, async move {
+                        WindowsDiskManager::start_hardware_watcher();
+                    }).await;
                 });
 
                 while let Some(result) = stream.next().await {
