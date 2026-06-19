@@ -11,6 +11,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import dev.datlag.isekai.ipc.BitLockerState
 import dev.datlag.isekai.ipc.Partition
+import dev.datlag.isekai.navigation.component.NewComboRow
 import dev.datlag.isekai.viewmodel.DiskViewModel
 import dev.datlag.isekai.viewmodel.kodeinViewModel
 import dev.datlag.kommons.adwaita.BannerButtonStyle
@@ -127,42 +128,57 @@ fun BlueprintScreen(
                     title = "Destination Drive",
                     description = "This will be resized to make room for Linux."
                 ) {
+                    var wipeDisk by remember(selectedDiskIndex, state.diskState.selectedDisk) {
+                        mutableStateOf(false)
+                    }
+
                     if (state.diskState.isLoading) {
                         ActionRow(
                             title = "Target Drive",
                             subtitle = "Checking for available drives",
                             suffix = { CircularProgressIndicator() }
                         )
-                    } else {
-                        ComboRow(
-                            title = "Select Target Drive",
-                            useSubtitle = true,
-                            model = diskModel,
-                            selected = selectedDiskIndex,
-                            onSelectedChange = {
-                                diskViewModel.selectDisk(it)
-                            },
-                            enableSearch = false
-                        )
                     }
-                    if (state.partitionState.isLoading) {
-                        ActionRow(
-                            title = "Partition",
-                            subtitle = "Checking for available partitions",
-                            suffix = { CircularProgressIndicator() }
-                        )
-                    } else {
-                        ComboRow(
-                            title = "Partition",
-                            useSubtitle = true,
-                            model = partitionModel,
-                            selected = selectedPartitionIndex,
-                            onSelectedChange = {
-                                diskViewModel.selectPartition(it)
-                            },
-                            enableSearch = false
-                        )
+
+                    NewComboRow(
+                        title = "Select Target Drive",
+                        useSubtitle = true,
+                        model = diskModel,
+                        selected = selectedDiskIndex,
+                        onSelectedChange = {
+                            diskViewModel.selectDisk(it)
+                        },
+                        enableSearch = false,
+                        visible = !state.diskState.isLoading
+                    )
+                    SwitchRow(
+                        title = "Wipe Disk",
+                        subtitle = "Clear entire drive",
+                        active = wipeDisk,
+                        enabled = state.diskState.selectedDisk?.isSystemDrive?.not() ?: true,
+                        onActiveChanged = { wipeDisk = it }
+                    )
+
+                    if (!wipeDisk) {
+                        if (state.partitionState.isLoading) {
+                            ActionRow(
+                                title = "Partition",
+                                subtitle = "Checking for available partitions",
+                                suffix = { CircularProgressIndicator() }
+                            )
+                        }
                     }
+                    NewComboRow(
+                        title = "Partition",
+                        useSubtitle = true,
+                        model = partitionModel,
+                        selected = selectedPartitionIndex,
+                        onSelectedChange = {
+                            diskViewModel.selectPartition(it)
+                        },
+                        enableSearch = false,
+                        visible = !wipeDisk && !state.partitionState.isLoading
+                    )
                 }
 
                 PreferencesGroup(

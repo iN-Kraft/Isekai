@@ -183,10 +183,13 @@ class DiskViewModel(
                 )
             },
             transform = { disks ->
+                val validId = current.selectedId?.takeIf { id -> disks.any { it.stableId == id } }
+                val newSelectedId = validId ?: disks.firstOrNull()?.stableId
+
                 State.DiskState(
                     isLoading = false,
                     disks = disks,
-                    selectedId = current.selectedId
+                    selectedId = newSelectedId
                 )
             }
         )
@@ -198,8 +201,10 @@ class DiskViewModel(
     ): State.PartitionState {
         if (disk == null) {
             return State.PartitionState(
-                isLoading = true,
-                partitions = emptyList()
+                isLoading = false,
+                partitions = emptyList(),
+                selectedLetter = null,
+                selectedId = null
             )
         }
 
@@ -226,11 +231,18 @@ class DiskViewModel(
                 )
             },
             transform = { parts ->
+                val validLetter = current.selectedLetter?.takeIf { letter -> parts.any { it.driveLetter == letter } }
+                val validId = if (validLetter != null) {
+                    parts.firstOrNull { it.driveLetter == validLetter }?.id
+                } else {
+                    null
+                } ?: current.selectedId?.takeIf { id -> parts.any { it.id == id } }
+
                 State.PartitionState(
                     isLoading = false,
                     partitions = parts,
-                    selectedLetter = current.selectedLetter,
-                    selectedId = current.selectedId
+                    selectedLetter = validLetter,
+                    selectedId = validId
                 )
             }
         )
