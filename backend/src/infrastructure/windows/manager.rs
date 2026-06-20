@@ -1,18 +1,22 @@
+use std::cmp::Reverse;
 use std::io::{Error, ErrorKind};
+use std::process::Stdio;
 use std::time::Duration;
 use async_trait::async_trait;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
 use windows_sys::Win32::System::SystemInformation::{FirmwareTypeUefi, GetFirmwareType};
 use crate::domain::errors::DiskError;
 use crate::domain::models::{Disk, Partition};
 use crate::domain::traits::DiskManager;
 use crate::infrastructure::windows::wmi::{BitLockerState, MsftDisk, MsftPartition, MsftPhysicalDisk, MsftVolume};
-use crate::infrastructure::windows::utils::PartitionUtils;
+use crate::infrastructure::windows::utils::{ParsingUtils, PartitionUtils};
 use wmi::WMIConnection;
 use crate::application::spawn_blocking_with_context;
 use crate::domain::{PARTITION_LABEL_EFI, PARTITION_LABEL_LIVE};
 use crate::infrastructure::CommandExt;
 use crate::infrastructure::windows::bitlocker::BitLocker;
+use crate::infrastructure::windows::diskpart::run_diskpart_script;
 use crate::ipc::protocol::{IpcEvent, OutgoingMessage};
 use crate::telemetry;
 
@@ -221,6 +225,42 @@ impl WindowsDiskManager {
         Err(DiskError::DataValidation("Failed to parse shrink size from Windows API".into()))
     }
 
+    pub async fn repair_disk(&self, drive_letter: &str, file_system: &str) -> Result<(), DiskError> {
+        let letter = drive_letter.trim_end_matches('\\');
+        let is_ntfs = file_system.eq_ignore_ascii_case("NTFS");
+        let args = if is_ntfs {
+            vec![letter, "/scan", "/perf"]
+        } else {
+            vec![letter, "/f", "/x"]
+        };
+        telemetry!(info, "Running chkdsk repair on {} to clear volume errors...", letter);
+
+        let output = Command::new("chkdsk.exe")
+            .kill_on_drop(true)
+            .no_window()
+            .args(&args)
+            .output()
+            .await
+            .map_err(DiskError::OsError)?;
+
+        // chkdsk exit codes:
+        // 0 = No errors
+        // 1 = Errors found and fixed
+        // 2 = Cleanup needed (but safe to proceed)
+        // >2 = Could not fix online or fatal error
+        if let Some(code) = output.status.code() {
+            if code > 2 {
+                telemetry!(warn, "Chkdsk reported unfixable errors (Code: {}). The shrink operation might be rejected by Windows.", code);
+            } else {
+                telemetry!(info, "Filesystem check complete. Volume is clean.");
+            }
+        } else {
+            telemetry!(warn, "Chkdsk terminated unexpectedly without an exit code.");
+        }
+
+        Ok(())
+    }
+
     pub fn start_hardware_watcher() {
         spawn_blocking_with_context(move || {
             let wmi_con = match WMIConnection::with_namespace_path("ROOT\\CIMV2") {
@@ -244,7 +284,7 @@ impl WindowsDiskManager {
             for event in iterator {
                 match event {
                     Ok(_) => {
-                        telemetry!(step, "HardwareChanged");
+                        telemetry!(info, "HardwareChanged");
                     }
                     Err(e) => {
                         telemetry!(error, "WMI watcher event error: {}", e);
@@ -426,6 +466,69 @@ impl DiskManager for WindowsDiskManager {
                 ErrorKind::Other,
                 format!("Diskpart silent failure: Partition size is {} bytes, but expected roughly {} bytes. Shrink aborted.", shrunken_part.size_bytes, target_size_bytes)
             )));
+        }
+
+        Ok(())
+    }
+
+    async fn uninstall_isekai(&self, disk_id: &str) -> Result<(), DiskError> {
+        let partitions = self.get_partitions(disk_id).await?;
+        let mut parts_to_delete = Vec::new();
+
+        for p in &partitions {
+            if p.label.contains(PARTITION_LABEL_LIVE) || p.label.contains(PARTITION_LABEL_EFI) {
+                parts_to_delete.push(p.clone())
+            }
+        }
+
+        if parts_to_delete.is_empty() {
+            telemetry!(warn, "No Isekai partitions found on disk {}. BCD was cleaned, but no disk space was reclaimed.", disk_id);
+            return Ok(());
+        }
+
+        parts_to_delete.sort_by_key(|p| Reverse(p.id.parse::<u32>().unwrap_or(0)));
+
+        for p in parts_to_delete {
+            telemetry!(info, "Deleting partition {} (Label: '{}')...", p.id, p.label);
+
+            let dp_script = format!(
+                "select disk {}\n\
+                select partition {}\n\
+                delete partition override\n\
+                exit\n",
+                disk_id, p.id
+            );
+            run_diskpart_script(&dp_script, format!("del_{}", p.id)).await?;
+        }
+        tokio::time::sleep(Duration::from_secs(4)).await;
+
+        let fresh_partitions = self.get_partitions(disk_id).await?;
+        let mut main_part = fresh_partitions.iter().find(|p| p.drive_letter.as_deref() == Some("C:"));
+
+        if main_part.is_none() {
+            main_part = fresh_partitions.iter()
+                .filter(|p| p.file_system.eq_ignore_ascii_case("NTFS"))
+                .max_by_key(|p| p.size_bytes)
+        }
+
+        if let Some(main) = main_part {
+            telemetry!(info, "Reclaiming unallocated space into main partition {}...", main.id);
+
+            let dp_script = format!(
+                "select disk {}\n\
+                select partition {}\n\
+                extend\n\
+                exit\n",
+                disk_id, main.id
+            );
+
+            if let Err(e) = run_diskpart_script(&dp_script, format!("ext_{}", main.id)).await {
+                telemetry!(warn, "Could not extend partition. Space remains unallocated. ({})", e);
+            } else {
+                telemetry!(info, "Successfully extended main partition.");
+            }
+        } else {
+            telemetry!(warn, "Could not confidently determine the main partition. Leaving space unallocated for safety.");
         }
 
         Ok(())

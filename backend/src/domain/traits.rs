@@ -9,4 +9,5 @@ pub trait DiskManager: Send + Sync {
     async fn get_disks(&self) -> Result<Vec<Disk>, DiskError>;
     async fn get_partitions(&self, disk_id: &str) -> Result<Vec<Partition>, DiskError>;
     async fn shrink_partition(&self, disk_id: &str, partition_id: &str, target_size_bytes: u64) -> Result<(), DiskError>;
+    async fn uninstall_isekai(&self, disk_id: &str) -> Result<(), DiskError>;
 }

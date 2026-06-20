@@ -53,6 +53,13 @@ sealed class IpcRequest {
         @SerialName("partition_id") val partitionId: String,
         @SerialName("iso_path") val isoPath: String
     ) : IpcRequest()
+
+    @Serializable
+    @SerialName("Uninstall")
+    data class Uninstall(
+        override val id: String,
+        @SerialName("disk_id") val diskId: String
+    ) : IpcRequest()
 }
 
 @Serializable

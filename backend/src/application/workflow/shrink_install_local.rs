@@ -1,5 +1,6 @@
 use std::io::{Error, ErrorKind};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::process::Command;
 use crate::application::spawn_blocking_with_context;
 use crate::application::state::{WorkflowGuard, WorkflowType};
@@ -31,7 +32,9 @@ pub async fn shrink_install_local(
         letter
     } else {
         telemetry!(info, "Mounting ISO Payload: {}", iso_path);
-        IsoManager::mount_iso(&iso_path).await?
+        let letter = IsoManager::mount_iso(&iso_path).await?;
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        letter
     };
 
     let is_bootable = IsoManager::verify_bootable_iso(&iso_drive_letter).await;
@@ -74,6 +77,7 @@ pub async fn shrink_install_local(
         let native_manager = NativeDiskManager::new(false);
         let is_uefi = NativeDiskManager::is_uefi_host();
         let target_letter = target_part.drive_letter.as_deref().unwrap_or("C:");
+        native_manager.repair_disk(target_letter, &target_part.file_system).await?;
 
         telemetry!(info, "Querying NTFS driver for maximum shrink boundary on {}...", target_letter);
         let size_min_bytes = native_manager.get_max_shrink_size(target_letter).await?;

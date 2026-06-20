@@ -55,6 +55,7 @@ fun <T : TranslationScreen> DefaultScreen(
                         supportUrl = "https://github.com/iN-Kraft/Isekai",
                         issueUrl = "https://github.com/iN-Kraft/Isekai/issues",
                         licenseType = License.GPL_3_0,
+                        copyright = "Copyright © Jeff Retz / iNKraft",
                         onClosed = { aboutDialogVisible = false }
                     )
 

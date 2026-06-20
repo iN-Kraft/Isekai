@@ -44,4 +44,10 @@ sealed interface Screen : NavKey {
             ) : Shrink
         }
     }
+
+    @Serializable
+    data object Uninstall : Screen
+
+    @Serializable
+    data object Home : Screen
 }

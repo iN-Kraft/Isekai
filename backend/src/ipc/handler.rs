@@ -6,6 +6,8 @@ use crate::infrastructure::windows::bitlocker::BitLocker;
 use crate::ipc::protocol::{IpcProtocol, IpcRequest, IpcResponse, OutgoingMessage, ResponseData};
 use crate::application::state::{SharedState, WorkflowGuard, WorkflowType};
 use crate::application::workflow::shrink_install_local::shrink_install_local;
+use crate::domain::errors::DiskError;
+use crate::infrastructure::windows::boot::BootManager;
 use crate::telemetry;
 
 pub async fn process_request(
@@ -125,6 +127,30 @@ pub async fn process_request(
             ).await {
                 Ok(_) => {
                     telemetry!(info, "Installation complete.");
+                    IpcResponse {
+                        id: req.id.clone(),
+                        success: true,
+                        data: Some(ResponseData::Empty),
+                        error: None
+                    }
+                }
+                Err(e) => build_error(&req.id, e.to_string())
+            }
+        }
+
+        IpcProtocol::Uninstall { disk_id } => {
+            telemetry!(info, "Starting Uninstallation process on Disk {}", disk_id);
+            let _workflow = WorkflowGuard::start(WorkflowType::Uninstall);
+            let uninstall_result = async {
+                BootManager::remove_isekai_boot_entries("Project Isekai").await?;
+                disk_manager.uninstall_isekai(&disk_id).await?;
+                Ok::<(), DiskError>(())
+            }.await;
+
+            match uninstall_result {
+                Ok(_) => {
+                    telemetry!(info, "Uninstallation completed successfully.");
+
                     IpcResponse {
                         id: req.id.clone(),
                         success: true,

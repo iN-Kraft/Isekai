@@ -17,6 +17,9 @@ pub enum IpcProtocol {
         disk_id: String,
         partition_id: String,
         iso_path: String
+    },
+    Uninstall {
+        disk_id: String
     }
 }
 

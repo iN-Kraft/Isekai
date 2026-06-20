@@ -11,8 +11,10 @@ import dev.datlag.isekai.navigation.IntroductionScreen
 import dev.datlag.isekai.navigation.NavBackStack
 import dev.datlag.isekai.navigation.NavHost
 import dev.datlag.isekai.navigation.DistroSelectionScreen
+import dev.datlag.isekai.navigation.HomeScreen
 import dev.datlag.isekai.navigation.InstallScreen
 import dev.datlag.isekai.navigation.Screen
+import dev.datlag.isekai.navigation.UninstallScreen
 import dev.datlag.isekai.navigation.component.LocalAppName
 import dev.datlag.kommons.adwaita.compose.adwaitaApplication
 import dev.datlag.kommons.gtk.glib.GLib
@@ -58,8 +60,11 @@ fun main(args: Array<String>) {
                     }
                     is Screen.Connection -> {
                         ConnectionScreen(
-                            onConnected = { backStack.replaceAll(Screen.DistroSelection) }
+                            onConnected = { backStack.replaceAll(Screen.Home) }
                         )
+                    }
+                    is Screen.Home -> {
+                        HomeScreen(onInstall = { backStack.push(Screen.DistroSelection) }, onUninstall = { backStack.push(Screen.Uninstall) })
                     }
                     is Screen.DistroSelection -> {
                         DistroSelectionScreen(
@@ -71,6 +76,9 @@ fun main(args: Array<String>) {
                     }
                     is Screen.Install -> {
                         InstallScreen(config = currentScreen)
+                    }
+                    is Screen.Uninstall -> {
+                        UninstallScreen(onBack = { backStack.pop() })
                     }
                 }
             }

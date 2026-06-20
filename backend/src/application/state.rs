@@ -7,7 +7,8 @@ use crate::telemetry;
 pub enum WorkflowType {
     ShrinkAndInstall,
     DownloadIso,
-    WipeDisk
+    WipeDisk,
+    Uninstall
 }
 
 pub struct WorkflowGuard;

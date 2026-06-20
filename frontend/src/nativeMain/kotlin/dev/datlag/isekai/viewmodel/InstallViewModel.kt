@@ -31,4 +31,19 @@ class InstallViewModel(
             )
         }
     }
+
+    fun uninstall(diskId: String) {
+        viewModelScope.launch {
+            fold(
+                block = { repository.uninstall(diskId) },
+                catch = { e ->
+                    e.printStackTrace()
+                },
+                recover = { err: IPCError ->
+                    println(err)
+                },
+                transform = { }
+            )
+        }
+    }
 }
