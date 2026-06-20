@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -28,6 +29,7 @@ import dev.datlag.kommons.adwaita.compose.component.ComboRow
 import dev.datlag.kommons.adwaita.compose.component.PreferencesGroup
 import dev.datlag.kommons.adwaita.compose.component.PreferencesPage
 import dev.datlag.kommons.adwaita.compose.component.Scaffold
+import dev.datlag.kommons.adwaita.compose.component.SpinRow
 import dev.datlag.kommons.adwaita.compose.component.SwitchRow
 import dev.datlag.kommons.adwaita.compose.component.TopAppBar
 import dev.datlag.kommons.adwaita.compose.component.WindowTitle
@@ -132,6 +134,7 @@ fun BlueprintScreen(
                     var wipeDisk by remember(selectedDiskIndex, state.diskState.selectedDisk) {
                         mutableStateOf(false)
                     }
+                    var additionalSpace by remember { mutableDoubleStateOf(0.0) }
 
                     if (state.diskState.isLoading) {
                         ActionRow(
@@ -179,6 +182,16 @@ fun BlueprintScreen(
                         },
                         enableSearch = false,
                         visible = !wipeDisk && !state.partitionState.isLoading
+                    )
+
+                    SpinRow(
+                        value = additionalSpace,
+                        onValueChange = {
+                            additionalSpace = it
+                        },
+                        title = "Additional Space",
+                        subtitle = "This space can be used to actually install the Linux Distribution then.",
+                        max = state.diskState.selectedDisk?.freeGb?.takeIf { it > 0u }?.toDouble() ?: 100.0
                     )
                 }
 
