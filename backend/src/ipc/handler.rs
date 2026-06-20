@@ -5,6 +5,7 @@ use crate::infrastructure::NativeValidator;
 use crate::infrastructure::windows::bitlocker::BitLocker;
 use crate::ipc::protocol::{IpcProtocol, IpcRequest, IpcResponse, OutgoingMessage, ResponseData};
 use crate::application::state::{SharedState, WorkflowGuard, WorkflowType};
+use crate::application::workflow::shrink_install_local::shrink_install_local;
 use crate::telemetry;
 
 pub async fn process_request(
@@ -102,6 +103,28 @@ pub async fn process_request(
 
             match BitLocker::suspend(&drive_letter).await {
                 Ok(_) => {
+                    IpcResponse {
+                        id: req.id.clone(),
+                        success: true,
+                        data: Some(ResponseData::Empty),
+                        error: None
+                    }
+                }
+                Err(e) => build_error(&req.id, e.to_string())
+            }
+        }
+
+        IpcProtocol::ShrinkInstallLocal { disk_id, partition_id, iso_path } => {
+            telemetry!(info, "Starting Shrink and Install process on {}, {}", disk_id, partition_id);
+
+            match shrink_install_local(
+                disk_manager.clone(),
+                disk_id,
+                partition_id,
+                iso_path
+            ).await {
+                Ok(_) => {
+                    telemetry!(info, "Installation complete.");
                     IpcResponse {
                         id: req.id.clone(),
                         success: true,

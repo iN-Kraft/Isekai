@@ -91,66 +91,76 @@ class IPCTransport(
         _connectionState.update { ConnectionState.Connecting }
 
         transportScope.launch {
-            val hEvent = withContext(Dispatchers.IO) {
-                CreateEventW(
-                    lpEventAttributes = null,
-                    bManualReset = 1,
-                    bInitialState = 0,
-                    lpName = "Local\\IsekaiDaemonReady"
+            var handle = withContext(Dispatchers.IO) {
+                CreateFileW(
+                    lpFileName = pipeName,
+                    dwDesiredAccess = (GENERIC_READ or GENERIC_WRITE.toUInt()),
+                    dwShareMode = 0u,
+                    lpSecurityAttributes = null,
+                    dwCreationDisposition = OPEN_EXISTING.toUInt(),
+                    dwFlagsAndAttributes = FILE_FLAG_WRITE_THROUGH,
+                    hTemplateFile = null
                 )
             }
 
-            if (hEvent == null || hEvent == INVALID_HANDLE_VALUE) {
-                _connectionState.update { ConnectionState.Error(IPCError.ConnectionFailed("Failed to create sync event.", GetLastError())) }
-                return@launch
-            }
-
-            try {
-                val launchSuccess = daemonLauncher.startBackend()
-                if (!launchSuccess) {
-                    _connectionState.update { ConnectionState.Error(IPCError.ConnectionFailed("Failed to start daemon process.")) }
-                    return@launch
-                }
-
-                withContext(Dispatchers.IO) {
-                    WaitForSingleObject(hEvent, INFINITE)
-                }
-
-                val handle = withContext(Dispatchers.IO) {
-                    CreateFileW(
-                        lpFileName = pipeName,
-                        dwDesiredAccess = (GENERIC_READ or GENERIC_WRITE.toUInt()),
-                        dwShareMode = 0u,
-                        lpSecurityAttributes = null,
-                        dwCreationDisposition = OPEN_EXISTING.toUInt(),
-                        dwFlagsAndAttributes = FILE_FLAG_WRITE_THROUGH,
-                        hTemplateFile = null
+            if (handle == INVALID_HANDLE_VALUE) {
+                val hEvent = withContext(Dispatchers.IO) {
+                    CreateEventW(
+                        lpEventAttributes = null,
+                        bManualReset = 1,
+                        bInitialState = 0,
+                        lpName = "Local\\IsekaiDaemonReady"
                     )
                 }
 
-                if (handle == INVALID_HANDLE_VALUE) {
-                    _connectionState.update {
-                        ConnectionState.Error(
-                            IPCError.ConnectionFailed(
-                                "Pipe was signaled but failed to open.",
-                                GetLastError()
-                            )
-                        )
-                    }
+                if (hEvent == null || hEvent == INVALID_HANDLE_VALUE) {
+                    _connectionState.update { ConnectionState.Error(IPCError.ConnectionFailed("Failed to create sync event.", GetLastError())) }
                     return@launch
                 }
 
-                pipeHandle = handle as HANDLE
-                _connectionState.update { ConnectionState.Connected }
+                try {
+                    val launchSuccess = daemonLauncher.startBackend()
+                    if (!launchSuccess) {
+                        _connectionState.update { ConnectionState.Error(IPCError.ConnectionFailed("Failed to start daemon process.")) }
+                        return@launch
+                    }
 
-                readJob = launch { readLoop(handle) }
-            } catch (e: Throwable) {
-                _connectionState.update {
-                    ConnectionState.Error(IPCError.ConnectionFailed("Crash during connection: ${e.message}", null))
+                    withContext(Dispatchers.IO) {
+                        WaitForSingleObject(hEvent, INFINITE)
+                    }
+
+                    handle = withContext(Dispatchers.IO) {
+                        CreateFileW(
+                            lpFileName = pipeName,
+                            dwDesiredAccess = (GENERIC_READ or GENERIC_WRITE.toUInt()),
+                            dwShareMode = 0u,
+                            lpSecurityAttributes = null,
+                            dwCreationDisposition = OPEN_EXISTING.toUInt(),
+                            dwFlagsAndAttributes = FILE_FLAG_WRITE_THROUGH,
+                            hTemplateFile = null
+                        )
+                    }
+                } finally {
+                    CloseHandle(hEvent)
                 }
-            } finally {
-                CloseHandle(hEvent)
             }
+
+            if (handle == INVALID_HANDLE_VALUE) {
+                _connectionState.update {
+                    ConnectionState.Error(
+                        IPCError.ConnectionFailed(
+                            "Pipe was signaled but failed to open.",
+                            GetLastError()
+                        )
+                    )
+                }
+                return@launch
+            }
+
+            pipeHandle = handle as HANDLE
+            _connectionState.update { ConnectionState.Connected }
+
+            readJob = launch { readLoop(handle) }
         }
     }
 

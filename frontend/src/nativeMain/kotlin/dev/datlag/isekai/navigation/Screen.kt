@@ -29,4 +29,19 @@ sealed interface Screen : NavKey {
             val edition: String?
         ) : BlueprintScreen
     }
+
+    @Serializable
+    sealed interface Install : Screen {
+
+        @Serializable
+        sealed interface Shrink : Install {
+
+            @Serializable
+            data class Local(
+                val diskId: String,
+                val partitionId: String,
+                val filePath: String,
+            ) : Shrink
+        }
+    }
 }

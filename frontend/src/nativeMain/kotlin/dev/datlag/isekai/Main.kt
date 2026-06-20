@@ -11,6 +11,7 @@ import dev.datlag.isekai.navigation.IntroductionScreen
 import dev.datlag.isekai.navigation.NavBackStack
 import dev.datlag.isekai.navigation.NavHost
 import dev.datlag.isekai.navigation.DistroSelectionScreen
+import dev.datlag.isekai.navigation.InstallScreen
 import dev.datlag.isekai.navigation.Screen
 import dev.datlag.isekai.navigation.component.LocalAppName
 import dev.datlag.kommons.adwaita.compose.adwaitaApplication
@@ -66,7 +67,10 @@ fun main(args: Array<String>) {
                         )
                     }
                     is Screen.BlueprintScreen -> {
-                        BlueprintScreen(config = currentScreen, onBack = { backStack.pop() })
+                        BlueprintScreen(config = currentScreen, onBack = { backStack.pop() }, onInstall = { backStack.push(it) })
+                    }
+                    is Screen.Install -> {
+                        InstallScreen(config = currentScreen)
                     }
                 }
             }

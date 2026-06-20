@@ -49,7 +49,8 @@ import kotlinx.coroutines.IO
 @Composable
 fun BlueprintScreen(
     config: Screen.BlueprintScreen,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onInstall: (Screen.Install) -> Unit
 ) {
     val diskViewModel = kodeinViewModel<DiskViewModel>(dispatcher = Dispatchers.IO)
     val state by diskViewModel.state.collectAsState()
@@ -231,7 +232,19 @@ fun BlueprintScreen(
                         onClosed = { showConfirm = false },
                         onResponse = { response ->
                             if (response.equals("confirm", ignoreCase = true)) {
-                                onBack()
+                                when (config) {
+                                    is Screen.BlueprintScreen.LocalFile -> {
+                                        val diskId = state.diskState.selectedDisk?.stableId ?: state.diskState.disks.getOrNull(selectedDiskIndex)?.stableId ?: return@AlertDialog
+                                        val partitionId = state.partitionState.selectedPartition?.id ?: state.partitionState.partitions.getOrNull(selectedPartitionIndex)?.id ?: return@AlertDialog
+
+                                        onInstall(Screen.Install.Shrink.Local(
+                                            diskId = diskId,
+                                            partitionId = partitionId,
+                                            filePath = config.filePath
+                                        ))
+                                    }
+                                    else -> { }
+                                }
                             }
                         }
                     )

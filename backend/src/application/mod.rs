@@ -1,5 +1,6 @@
 pub mod telemetry;
 pub mod state;
+pub mod workflow;
 
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;

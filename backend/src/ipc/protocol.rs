@@ -12,7 +12,12 @@ pub enum IpcProtocol {
     GetPartitions { disk_id: String },
     ShrinkPartition { disk_id: String, partition_id: String, target_size_gb: u32 },
     UnlockBitlocker { drive_letter: String },
-    SuspendBitlocker { drive_letter: String }
+    SuspendBitlocker { drive_letter: String },
+    ShrinkInstallLocal {
+        disk_id: String,
+        partition_id: String,
+        iso_path: String
+    }
 }
 
 #[derive(Deserialize, Debug)]

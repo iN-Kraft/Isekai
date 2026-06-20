@@ -13,6 +13,10 @@ sealed class IpcRequest {
     abstract val id: String
 
     @Serializable
+    @SerialName("GetState")
+    data class GetState(override val id: String) : IpcRequest()
+
+    @Serializable
     @SerialName("CheckSystem")
     data class CheckSystem(override val id: String) : IpcRequest()
 
@@ -28,15 +32,6 @@ sealed class IpcRequest {
     ) : IpcRequest()
 
     @Serializable
-    @SerialName("ShrinkPartition")
-    data class ShrinkPartition(
-        override val id: String,
-        @SerialName("disk_id") val diskId: String,
-        @SerialName("partition_id") val partitionId: String,
-        @SerialName("target_size_gb") val targetSizeGb: UInt,
-    ) : IpcRequest()
-
-    @Serializable
     @SerialName("UnlockBitlocker")
     data class UnlockBitlocker(
         override val id: String,
@@ -48,6 +43,15 @@ sealed class IpcRequest {
     data class SuspendBitlocker(
         override val id: String,
         @SerialName("drive_letter") val driveLetter: String
+    ) : IpcRequest()
+
+    @Serializable
+    @SerialName("ShrinkInstallLocal")
+    data class ShrinkInstallLocal(
+        override val id: String,
+        @SerialName("disk_id") val diskId: String,
+        @SerialName("partition_id") val partitionId: String,
+        @SerialName("iso_path") val isoPath: String
     ) : IpcRequest()
 }
 
@@ -75,6 +79,20 @@ sealed class OutgoingMessage {
 /**
  * Domain Models mapped from Rust.
  */
+
+@Serializable
+enum class WorkflowType {
+    @SerialName("ShrinkAndInstall")
+    ShrinkAndInstall
+}
+
+@Serializable
+data class AppState(
+    @SerialName("active_workflow") val activeWorkflow: WorkflowType? = null,
+    @SerialName("current_step") val currentStep: String? = null,
+    @SerialName("step_progress") val stepProgress: Int? = null,
+    @SerialName("step_details") val stepDetails: String? = null
+)
 
 @Serializable
 data class Disk(
