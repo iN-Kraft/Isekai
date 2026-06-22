@@ -1,6 +1,7 @@
 package dev.datlag.isekai.navigation
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 @Serializable
 sealed interface Screen : NavKey {
@@ -27,7 +28,16 @@ sealed interface Screen : NavKey {
         data class Download(
             val name: String,
             val edition: String?
-        ) : BlueprintScreen
+        ) : BlueprintScreen {
+            @Transient
+            val id: String = buildString {
+                append(name.lowercase().replace("\\s+".toRegex(), "-"))
+                if (!edition.isNullOrBlank()) {
+                    append("-")
+                    append(edition.lowercase().replace("\\s+".toRegex(), "-"))
+                }
+            }
+        }
     }
 
     @Serializable

@@ -1,0 +1,73 @@
+{
+  "fedora-gnome": {
+    "version": "44",
+    "mirrors": [
+      "https://download.fedoraproject.org/pub/fedora/linux/releases/44/Workstation/x86_64/iso/Fedora-Workstation-Live-44-1.7.x86_64.iso",
+      "https://mirror.netzwerge.de/fedora/linux/releases/44/Workstation/x86_64/iso/Fedora-Workstation-Live-44-1.7.x86_64.iso"
+    ],
+    "checksum": "1620295f6a00c27c3208f0c00b8ece4eab1ec69b9002152d97488bf26a426ddf",
+    "secure_boot": true
+  },
+  "fedora-kde": {
+    "version": "44",
+    "mirrors": [
+      "https://download.fedoraproject.org/pub/fedora/linux/releases/44/KDE/x86_64/iso/Fedora-KDE-Desktop-Live-44-1.7.x86_64.iso",
+      "https://download.netzwerge.de/fedora/linux/releases/44/KDE/x86_64/iso/Fedora-KDE-Desktop-Live-44-1.7.x86_64.iso"
+    ],
+    "checksum": "c8295961d4c41adbf785a31a17c21a971d3b7415fda72dcad0c11c49577bf03a",
+    "secure_boot": true
+  },
+  "linux-mint-cinnamon": {
+    "version": "22.3",
+    "mirrors": [
+      "https://pub.linuxmint.io/stable/22.3/linuxmint-22.3-cinnamon-64bit.iso",
+      "https://mirrors.cicku.me/linuxmint/iso/stable/22.3/linuxmint-22.3-cinnamon-64bit.iso"
+    ],
+    "checksum": "a081ab202cfda17f6924128dbd2de8b63518ac0531bcfe3f1a1b88097c459bd4",
+    "secure_boot": true
+  },
+  "linux-mint-mate": {
+    "version": "22.3",
+    "mirrors": [
+      "https://pub.linuxmint.io/stable/22.3/linuxmint-22.3-mate-64bit.iso",
+      "https://mirrors.cicku.me/linuxmint/iso/stable/22.3/linuxmint-22.3-mate-64bit.iso"
+    ],
+    "checksum": "7609294da613b75eea89bb918292125e9f06418a368136fb190466e15bf8c373",
+    "secure_boot": true
+  },
+  "linux-mint-xfce": {
+    "version": "22.3",
+    "mirrors": [
+      "https://pub.linuxmint.io/stable/22.3/linuxmint-22.3-xfce-64bit.iso",
+      "https://mirrors.cicku.me/linuxmint/iso/stable/22.3/linuxmint-22.3-xfce-64bit.iso"
+    ],
+    "checksum": "45a835b5dddaf40e84d776549e0b19b3fbd49673b6cc6434ebddbfcd217df776",
+    "secure_boot": true
+  },
+  "zorin-os-core": {
+    "version": "18.1",
+    "mirrors": [
+      "https://mirrors.edge.kernel.org/zorinos-isos/18/Zorin-OS-18.1-Core-64-bit.iso",
+      "https://mirror.23m.com/zorinos/isos/18/Zorin-OS-18.1-Core-64-bit.iso"
+    ],
+    "checksum": "44649b97bd307fc4c8529205d098ebbf98575a1e1ba2ee7d7005b697af1721d5",
+    "secure_boot": true
+  },
+  "zorin-os-education": {
+    "version": "18.1",
+    "mirrors": [
+      "https://mirrors.edge.kernel.org/zorinos-isos/18/Zorin-OS-18.1-Education-64-bit.iso",
+      "https://mirror.23m.com/zorinos/isos/18/Zorin-OS-18.1-Education-64-bit.iso"
+    ],
+    "checksum": "f24b83bc1bf4f90618fb56e817fe3c1e67328e68720a8350131080db38bf9437",
+    "secure_boot": true
+  },
+  "cachyos": {
+    "version": "2026-04-26",
+    "mirrors": [
+      "https://cdn77.cachyos.org/ISO/desktop/260426/cachyos-desktop-linux-260426.iso"
+    ],
+    "checksum": "9a280d1e9732cfe50ab02db6a7e44ae0d9e6a10e6ea394f73192f7c14e263118",
+    "secure_boot": true
+  }
+}
