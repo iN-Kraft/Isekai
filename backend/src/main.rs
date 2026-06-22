@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use domain::traits::DiskManager;
 use infrastructure::NativeDiskManager;
+use crate::infrastructure::logger::Logger;
 use crate::ipc::server::IpcServer;
 use crate::ipc::server::PIPE_NAME;
 
@@ -17,26 +18,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     use clap::Parser;
     let cli = cli::commands::IsekaiCli::parse();
-
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| {
-            let level = if cli.debug { "debug" } else { "info" };
-            tracing_subscriber::EnvFilter::new(format!("{},rustyline=warn,wmi=warn", level))
-        });
-
     let is_daemon = !cli.cli && cli.command.is_none();
-
-    let builder = tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
-        .with_writer(std::io::stderr)
-        .with_ansi(true)
-        .compact();
-
-    if is_daemon {
-        builder.init();
-    } else {
-        builder.without_time().init();
-    }
+    let _log_guard = Logger::init(cli.debug, is_daemon);
 
     if cli.debug {
         tracing::debug!("Debug mode enabled.");
