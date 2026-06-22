@@ -1,11 +1,13 @@
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
+use tracing::{debug, trace};
 use crate::domain::traits::DiskManager;
-use crate::infrastructure::NativeValidator;
 use crate::infrastructure::windows::bitlocker::BitLocker;
 use crate::ipc::protocol::{IpcProtocol, IpcRequest, IpcResponse, OutgoingMessage, ResponseData};
-use crate::application::state::{SharedState, WorkflowGuard, WorkflowType};
-use crate::application::workflow::shrink_install_local::shrink_install_local;
+use crate::application::state::{WorkflowGuard, WorkflowType};
+use crate::application::workflow::shrink_install_local::ShrinkInstallWorkflow;
+use crate::application::workflow::uninstall::{UninstallWorkflow};
+use crate::application::workflow::WorkflowRunner;
 use crate::domain::errors::DiskError;
 use crate::infrastructure::windows::boot::BootManager;
 use crate::telemetry;
@@ -13,34 +15,10 @@ use crate::telemetry;
 pub async fn process_request(
     req: IpcRequest,
     disk_manager: Arc<dyn DiskManager>,
-    tx: Sender<OutgoingMessage>,
-    state: SharedState
+    tx: Sender<OutgoingMessage>
 ) {
-    telemetry!(info, "Processing Request: {:?}", req);
+    debug!("Processing Request: {:?}", req);
     let response = match req.payload {
-        IpcProtocol::GetState => {
-            let current_state = state.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
-
-            IpcResponse {
-                id: req.id.clone(),
-                success: true,
-                data: Some(ResponseData::AppState(current_state)),
-                error: None
-            }
-        }
-
-        IpcProtocol::CheckSystem => {
-            match NativeValidator::run_checks().await {
-                Ok(report) => IpcResponse {
-                    id: req.id.clone(),
-                    success: true,
-                    data: Some(ResponseData::Validation(report)),
-                    error: None,
-                },
-                Err(e) => build_error(&req.id, e.to_string()),
-            }
-        }
-
         IpcProtocol::GetDisks => {
             match disk_manager.get_disks().await {
                 Ok(disks) => IpcResponse {
@@ -65,28 +43,7 @@ pub async fn process_request(
             }
         }
 
-        IpcProtocol::ShrinkPartition { disk_id, partition_id, target_size_gb } => {
-            let _workflow = WorkflowGuard::start(WorkflowType::ShrinkAndInstall);
-            telemetry!(step, format!("Initializing shrink for Partition {}...", partition_id));
-
-            match disk_manager.shrink_partition(&disk_id, &partition_id, target_size_gb as u64).await {
-                Ok(_) => {
-                    telemetry!(info, "Shrink complete.");
-
-                    IpcResponse {
-                        id: req.id.clone(),
-                        success: true,
-                        data: Some(ResponseData::Empty),
-                        error: None,
-                    }
-                }
-                Err(e) => build_error(&req.id, e.to_string()),
-            }
-        }
-
         IpcProtocol::UnlockBitlocker { drive_letter } => {
-            telemetry!(info, "Waiting for user to unlock BitLocker.");
-
             match BitLocker::prompt_unlock(&drive_letter).await {
                 Ok(_) => {
                     IpcResponse {
@@ -101,8 +58,6 @@ pub async fn process_request(
         }
 
         IpcProtocol::SuspendBitlocker { drive_letter } => {
-            telemetry!(info, "Suspending Bitlocker for drive {}", drive_letter);
-
             match BitLocker::suspend(&drive_letter).await {
                 Ok(_) => {
                     IpcResponse {
@@ -116,17 +71,18 @@ pub async fn process_request(
             }
         }
 
-        IpcProtocol::ShrinkInstallLocal { disk_id, partition_id, iso_path } => {
-            telemetry!(info, "Starting Shrink and Install process on {}, {}", disk_id, partition_id);
+        // --- LONG RUNNING WORKFLOWS --- \\
 
-            match shrink_install_local(
-                disk_manager.clone(),
+        IpcProtocol::ShrinkInstallLocal { disk_id, partition_id, iso_path } => {
+            let workflow = ShrinkInstallWorkflow {
+                disk_manager: disk_manager.clone(),
                 disk_id,
                 partition_id,
                 iso_path
-            ).await {
+            };
+
+            match WorkflowRunner::run(workflow).await {
                 Ok(_) => {
-                    telemetry!(info, "Installation complete.");
                     IpcResponse {
                         id: req.id.clone(),
                         success: true,
@@ -139,18 +95,13 @@ pub async fn process_request(
         }
 
         IpcProtocol::Uninstall { disk_id } => {
-            telemetry!(info, "Starting Uninstallation process on Disk {}", disk_id);
-            let _workflow = WorkflowGuard::start(WorkflowType::Uninstall);
-            let uninstall_result = async {
-                BootManager::remove_isekai_boot_entries("Project Isekai").await?;
-                disk_manager.uninstall_isekai(&disk_id).await?;
-                Ok::<(), DiskError>(())
-            }.await;
+            let workflow = UninstallWorkflow {
+                disk_manager: disk_manager.clone(),
+                disk_id
+            };
 
-            match uninstall_result {
+            match WorkflowRunner::run(workflow).await {
                 Ok(_) => {
-                    telemetry!(info, "Uninstallation completed successfully.");
-
                     IpcResponse {
                         id: req.id.clone(),
                         success: true,

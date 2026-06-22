@@ -2,6 +2,7 @@ use std::io::{Error, ErrorKind};
 use std::path::Path;
 use async_trait::async_trait;
 use tokio::process::Command;
+use tracing::{error, info};
 use crate::domain::errors::DiskError;
 use crate::domain::PARTITION_LABEL_LIVE;
 use crate::infrastructure::assets::{GRLDR, GRLDR_MBR};
@@ -19,7 +20,7 @@ impl BootStrategy for LegacyBootManager {
         let mbr_path = Path::new(&base_path).join("grldr.mbr");
         let grldr_path = Path::new(&base_path).join("grldr");
 
-        telemetry!(info, "Dropping Legacy BootLoader payloads to {}...", base_path);
+        info!("Dropping Legacy BootLoader payloads to {}...", base_path);
 
         tokio::fs::write(&mbr_path, GRLDR_MBR).await.map_err(DiskError::OsError)?;
         tokio::fs::write(&grldr_path, GRLDR).await.map_err(DiskError::OsError)?;
@@ -28,7 +29,7 @@ impl BootStrategy for LegacyBootManager {
     }
 
     async fn patch_windows_bcd(&self, distro_name: &str, os_drive: &str) -> Result<(), DiskError> {
-        telemetry!(info, "Patching Windows BCD for Legacy Chainloading...");
+        info!("Patching Windows BCD for Legacy Chainloading...");
 
         let create_out = Command::new("bcdedit.exe")
             .kill_on_drop(true)
@@ -48,7 +49,7 @@ impl BootStrategy for LegacyBootManager {
             )));
         };
 
-        telemetry!(info, "Created Legacy Boot Entry: {}", guid);
+        info!("Created Legacy Boot Entry: {}", guid);
 
         let run_cmd = |args: Vec<String>| async move {
             let out = Command::new("bcdedit.exe")
@@ -79,7 +80,7 @@ impl BootStrategy for LegacyBootManager {
             run_cmd(vec!["/set".to_string(), "{bootmgr}".to_string(), "displaybootmenu".to_string(), "yes".to_string()]).await?;
             run_cmd(vec!["/timeout".to_string(), "5".to_string()]).await?;
 
-            telemetry!(info, "Disabling Windows Fast Startup...");
+            info!("Disabling Windows Fast Startup...");
             let _ = Command::new("powercfg.exe")
                 .kill_on_drop(true)
                 .no_window()
@@ -91,7 +92,7 @@ impl BootStrategy for LegacyBootManager {
         }.await;
 
         if let Err(e) = config_result {
-            telemetry!(error, "Error configuring BCD entry: {}. Rolling back...", e);
+            error!("Error configuring BCD entry: {}. Rolling back...", e);
 
             let _ = Command::new("bcdedit.exe")
                 .kill_on_drop(true)
@@ -102,7 +103,7 @@ impl BootStrategy for LegacyBootManager {
             return Err(e);
         }
 
-        telemetry!(info, "Legacy BCD patch successful!");
+        info!("Legacy BCD patch successful!");
         Ok(())
     }
 

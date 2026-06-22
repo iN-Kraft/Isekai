@@ -1,16 +1,13 @@
 use serde::{Deserialize, Serialize};
 use crate::domain::models::{Disk, Partition};
-use crate::domain::validation::ValidationReport;
-use crate::application::state::{AppState, WorkflowType};
+use crate::application::state::{WorkflowType};
+use crate::define_telemetry;
 
 #[derive(Deserialize, Debug)]
 #[serde(tag = "method")]
 pub enum IpcProtocol {
-    GetState,
-    CheckSystem,
     GetDisks,
     GetPartitions { disk_id: String },
-    ShrinkPartition { disk_id: String, partition_id: String, target_size_gb: u32 },
     UnlockBitlocker { drive_letter: String },
     SuspendBitlocker { drive_letter: String },
     ShrinkInstallLocal {
@@ -33,11 +30,9 @@ pub struct IpcRequest {
 #[derive(Serialize, Debug)]
 #[serde(untagged)]
 pub enum ResponseData {
-    Validation(ValidationReport),
     Disks(Vec<Disk>),
     Partitions(Vec<Partition>),
     Empty,
-    AppState(AppState)
 }
 
 #[derive(Serialize, Debug)]
@@ -50,19 +45,57 @@ pub struct IpcResponse {
     pub error: Option<String>,
 }
 
-#[derive(Serialize, Debug)]
-pub struct IpcEvent {
-    pub event_type: String, // Either of: "progress", "step", "start", "end"
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub percent: Option<u8>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub workflow: Option<WorkflowType>
+define_telemetry! {
+    pub enum IPCEvent {
+        #[telemetry(start, "Starting workflow: {workflow_type:?}")]
+        WorkflowStarted { workflow_type: WorkflowType },
+
+        #[telemetry(end, "Workflow completed. Success: {success}")]
+        WorkflowEnded { success: bool, message: Option<String> },
+
+        // --- UNINSTALL STEPS ---
+        #[telemetry(step, "Cleaning Windows Boot Manager entries...")]
+        StepCleaningBootloader,
+
+        #[telemetry(step, "Deleting partitions and reclaiming space...")]
+        StepDeletingPartitions,
+
+        // --- INSTALL STEPS ---
+        #[telemetry(step, "Mounting and verifying ISO payload...")]
+        StepMountingISO,
+
+        #[telemetry(step, "Analyzing disk space requirements...")]
+        StepCalculatingSpace,
+
+        #[telemetry(step, "Running pre-flight checks and verifying filesystem...")]
+        StepPreFlightChecks,
+
+        #[telemetry(step, "Shrinking Windows partition {partition_id}...")]
+        StepShrinkingPartition { partition_id: String },
+
+        #[telemetry(step, "Creating live boot partitions...")]
+        StepCreatingBootPartitions,
+
+        #[telemetry(step, "Cloning OS payload to new partition...")]
+        StepCopyingPayload,
+
+        #[telemetry(step, "Configuring Windows Boot Manager...")]
+        StepConfiguringBootloader,
+
+        #[telemetry(warn, "{message}")]
+        Warning { message: String },
+
+        #[telemetry(progress, "Copying Payload: {percent}%")]
+        ProgressCopyingPayload { copied_bytes: u64, total_bytes: u64, percent: u8 },
+
+        #[telemetry(info, "Hardware changes detected. Refreshing system state...")]
+        SystemHardwareChanged
+    }
 }
 
 #[derive(Serialize, Debug)]
 #[serde(tag = "type")]
 pub enum OutgoingMessage {
     Response(IpcResponse),
-    Event(IpcEvent),
+    Event { payload: IPCEvent },
 }

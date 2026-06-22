@@ -3,6 +3,7 @@ use std::io::{BufReader, Error, ErrorKind, Read};
 use std::path::Path;
 use sha2::{Digest, Sha256};
 use tokio::process::Command;
+use tracing::debug;
 use crate::application::spawn_blocking_with_context;
 use crate::domain::errors::DiskError;
 use crate::infrastructure::CommandExt;
@@ -71,22 +72,9 @@ impl IsoManager {
         let clean_letter = drive_letter.trim_matches(|c| c == '\\' || c == '/' || c == ':');
         let base_path = format!("{}:\\", clean_letter);
 
-        telemetry!(debug, "Verifying ISO at base path: [{}]", base_path);
+        debug!("Verifying ISO at base path: [{}]", base_path);
 
         let exists = spawn_blocking_with_context(move || {
-            telemetry!(debug, "Directory listing for [{}]:", base_path);
-            match read_dir(&base_path) {
-                Ok(entries) => {
-                    for entry in entries.flatten() {
-                        telemetry!(debug, "  -> {:?}", entry.file_name());
-                    }
-                }
-                Err(e) => {
-                    telemetry!(error, "FATAL: Rust cannot read the root directory of {}! Error: {}", base_path, e);
-                    telemetry!(error, "If the error is 'System cannot find the path specified', this is UAC Drive Isolation.");
-                }
-            }
-
             for indicator in indicators {
                 let check_path = Path::new(&base_path).join(indicator);
                 if check_path.exists() {

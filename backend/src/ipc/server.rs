@@ -18,7 +18,6 @@ use windows_sys::Win32::System::Threading::{OpenEventW, SetEvent, EVENT_MODIFY_S
 use crate::application::{AppContext, APP_CONTEXT};
 use crate::ipc::handler::process_request;
 use crate::ipc::protocol::{IpcRequest, OutgoingMessage};
-use crate::application::state::{AppState, SharedState};
 use crate::infrastructure::windows::WindowsDiskManager;
 
 pub(crate) const PIPE_NAME: &str = r"\\.\pipe\isekai_daemon";
@@ -26,7 +25,6 @@ pub(crate) const PIPE_NAME: &str = r"\\.\pipe\isekai_daemon";
 pub struct IpcServer {
     disk_manager: Arc<dyn DiskManager>,
     pipe_name: String,
-    state: SharedState,
     connected_clients: Arc<AtomicUsize>,
     active_tasks: Arc<AtomicUsize>
 }
@@ -36,7 +34,6 @@ impl IpcServer {
         Self {
             disk_manager,
             pipe_name: pipe_name.into(),
-            state: Arc::new(RwLock::new(AppState::default())),
             connected_clients: Arc::new(AtomicUsize::new(0)),
             active_tasks: Arc::new(AtomicUsize::new(0))
         }
@@ -99,7 +96,6 @@ impl IpcServer {
             server = Self::create_pipe_with_security(&self.pipe_name, false)?;
 
             let dm = self.disk_manager.clone();
-            let state = self.state.clone();
 
             let clients_tracker = self.connected_clients.clone();
             let tasks_tracker = self.active_tasks.clone();
@@ -119,7 +115,7 @@ impl IpcServer {
                     }
                 });
 
-                let ctx_for_watcher = AppContext::IPC(tx.clone(), state.clone());
+                let ctx_for_watcher = AppContext::IPC(tx.clone());
                 spawn(async move {
                     APP_CONTEXT.scope(ctx_for_watcher, async move {
                         WindowsDiskManager::start_hardware_watcher();
@@ -135,15 +131,14 @@ impl IpcServer {
 
                                     let tx_clone = tx.clone();
                                     let dm_clone = dm.clone();
-                                    let state_clone = state.clone();
                                     let task_tracker_clone = tasks_tracker.clone();
                                     let client_tracker_clone = clients_tracker.clone();
 
                                     spawn(async move {
-                                        let ctx = AppContext::IPC(tx_clone.clone(), state_clone.clone());
+                                        let ctx = AppContext::IPC(tx_clone.clone());
 
                                         APP_CONTEXT.scope(ctx, async move {
-                                            process_request(req, dm_clone, tx_clone, state_clone).await;
+                                            process_request(req, dm_clone, tx_clone).await;
 
                                             task_tracker_clone.fetch_sub(1, Ordering::SeqCst);
                                             Self::evaluate_shutdown(&client_tracker_clone, &task_tracker_clone);

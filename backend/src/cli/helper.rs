@@ -23,7 +23,7 @@ impl Completer for IsekaiHelper {
         let tokens_len_actual = if is_space { tokens.len() + 1 } else { tokens.len() };
 
         if tokens_len_actual == 1 {
-            let cmds = ["check", "list", "parts", "shrink-and-install", "exit", "quit", "help"];
+            let cmds = ["list", "parts", "shrink-and-install", "exit", "quit", "help"];
             for cmd in cmds {
                 if cmd.starts_with(word) {
                     candidates.push(Pair { display: cmd.to_string(), replacement: cmd.to_string() });

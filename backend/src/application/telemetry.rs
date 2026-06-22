@@ -1,162 +1,72 @@
 #[macro_export]
+macro_rules! define_telemetry {
+    (
+        $(#[$router:meta])*
+        pub enum $enum_name:ident {
+            $(
+                #[telemetry($lvl:ident, $msg:literal)]
+                $variant:ident $({ $($field:ident : $ftype:ty),* $(,)? })?
+            ),* $(,)?
+        }
+    ) => {
+        $(#[$router])*
+        #[derive(serde::Serialize, Debug, Clone)]
+        #[serde(tag = "event_type")]
+        pub enum $enum_name {
+            $(
+                $variant $({ $($field: $ftype),* })*
+            ),*
+        }
+
+        impl $enum_name {
+            #[allow(unused_variables)]
+            pub fn message(&self) -> String {
+                match self {
+                    $(
+                        $enum_name::$variant $({ $($field),* })* => format!($msg),
+                    )*
+                }
+            }
+
+            pub fn log_to_tracing(&self) {
+                let msg = self.message();
+                match self {
+                    $(
+                        $enum_name::$variant $({ $($field: _),* })* => {
+                            $crate::telemetry_log_level!($lvl, &msg);
+                        }
+                    )*
+                }
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! telemetry_log_level {
+    (error, $msg:expr) => { tracing::error!("{}", $msg) };
+    (warn, $msg:expr) => { tracing::warn!("{}", $msg) };
+    (info, $msg:expr) => { tracing::info!("{}", $msg) };
+    (debug, $msg:expr) => { tracing::debug!("{}", $msg) };
+    (trace, $msg:expr) => { tracing::trace!("{}", $msg) };
+
+    (start, $msg:expr) => { tracing::info!("[START] {}", $msg) };
+    (step, $msg:expr) => { tracing::info!(">>> {}", $msg) };
+    (end, $msg:expr) => { tracing::info!("[END] {}", $msg) };
+
+    (progress, $msg:expr) => { tracing::debug!("[PROGRESS] {}", $msg) };
+}
+
+#[macro_export]
 macro_rules! telemetry {
-    (start, $workflow:expr) => {
+    ($event:expr) => {
+        let evt = $event;
+        evt.log_to_tracing();
+
         let current_ctx = $crate::application::APP_CONTEXT.with(|ctx| ctx.clone());
-        let state = match &current_ctx {
-            $crate::application::AppContext::CLI(s) => s,
-            $crate::application::AppContext::IPC(_, s) => s
-        };
-
-        if let Ok(mut lock) = state.write() {
-            lock.active_workflow = Some($workflow);
-            lock.step_progress = Some(0);
-            lock.step_details = Some("Initializing...".to_string());
-        }
-
-        match current_ctx {
-            $crate::application::AppContext::CLI(_) => {
-                tracing::info!("=== STARTING WORKFLOW: {:?} ===", $workflow);
-            }
-            $crate::application::AppContext::IPC(tx, _) => {
-                tracing::info!("=== STARTING WORKFLOW: {:?} ===", $workflow);
-                let event = $crate::ipc::protocol::IpcEvent {
-                    event_type: "start".to_string(),
-                    message: "Initializing...".to_string(),
-                    percent: Some(0),
-                    workflow: Some($workflow.clone()), // PASS THE WORKFLOW HERE!
-                };
-                let _ = tx.try_send($crate::ipc::protocol::OutgoingMessage::Event(event));
-            }
+        if let $crate::application::AppContext::IPC(tx) = current_ctx {
+            let outgoing = $crate::ipc::protocol::OutgoingMessage::Event { payload: evt };
+            let _ = tx.try_send(outgoing);
         }
     };
-
-    (end) => {
-        let current_ctx = $crate::application::APP_CONTEXT.with(|ctx| ctx.clone());
-        let state = match &current_ctx {
-            $crate::application::AppContext::CLI(s) => s,
-            $crate::application::AppContext::IPC(_, s) => s
-        };
-
-        let ended_workflow = if let Ok(mut lock) = state.write() {
-            let w = lock.active_workflow.clone();
-            lock.active_workflow = None;
-            lock.step_progress = None;
-            lock.step_details = None;
-            w
-        } else {
-            None
-        };
-
-        match current_ctx {
-            $crate::application::AppContext::CLI(_) => {
-                tracing::info!("=== WORKFLOW ENDED ===");
-            }
-            $crate::application::AppContext::IPC(tx, _) => {
-                tracing::info!("=== WORKFLOW ENDED ===");
-                let event = $crate::ipc::protocol::IpcEvent {
-                    event_type: "end".to_string(),
-                    message: "Workflow complete.".to_string(),
-                    percent: None,
-                    workflow: ended_workflow, // Optional: tell the GUI which workflow just finished
-                };
-                let _ = tx.try_send($crate::ipc::protocol::OutgoingMessage::Event(event));
-            }
-        }
-    };
-
-    (step, $msg:expr) => {
-        let current_ctx = $crate::application::APP_CONTEXT.with(|ctx| ctx.clone());
-
-        let state = match &current_ctx {
-            $crate::application::AppContext::CLI(s) => s,
-            $crate::application::AppContext::IPC(_, s) => s
-        };
-
-        if let Ok(mut lock) = state.write() {
-            lock.current_step = Some($msg.to_string());
-            lock.step_details = None;
-            lock.step_progress = None;
-        }
-
-        match current_ctx {
-            $crate::application::AppContext::CLI(_) => {
-                tracing::info!(">>> Step: {}", $msg);
-            }
-            $crate::application::AppContext::IPC(tx, _) => {
-                tracing::info!(">>> Step: {}", $msg);
-                let event = $crate::ipc::protocol::IpcEvent {
-                    event_type: "step".to_string(),
-                    message: $msg.to_string(),
-                    percent: None,
-                    workflow: None
-                };
-                let _ = tx.try_send($crate::ipc::protocol::OutgoingMessage::Event(event));
-            }
-        }
-    };
-
-    // Progress Events: ctx, progress, percent, "message", args
-    (progress, $percent:expr, $details:expr $(, $args:expr)*) => {
-        let formatted_msg = format!($details $(, $args)*);
-        let current_ctx = $crate::application::APP_CONTEXT.with(|ctx| ctx.clone());
-
-        let state = match &current_ctx {
-            $crate::application::AppContext::CLI(s) => s,
-            $crate::application::AppContext::IPC(_, s) => s
-        };
-
-        if let Ok(mut lock) = state.write() {
-            lock.step_progress = Some($percent as u8);
-            lock.step_details = Some(formatted_msg.clone());
-        }
-
-        match current_ctx {
-            $crate::application::AppContext::CLI(_) => {
-                tracing::info!("[{}%] {}", $percent, formatted_msg);
-            }
-            $crate::application::AppContext::IPC(tx, _) => {
-                tracing::info!("[{}%] {}", $percent, formatted_msg);
-                let event = $crate::ipc::protocol::IpcEvent {
-                    event_type: "progress".to_string(),
-                    message: formatted_msg,
-                    percent: Some($percent as u8),
-                    workflow: None
-                };
-
-                let _ = tx.try_send($crate::ipc::protocol::OutgoingMessage::Event(event));
-            }
-        }
-    };
-
-    // Standard Events: ctx, info/warn/error, "message", args
-    ($lvl:ident, $msg:expr $(, $args:expr)*) => {
-        let formatted_msg = format!($msg $(, $args)*);
-        let current_ctx = $crate::application::APP_CONTEXT.with(|ctx| ctx.clone());
-
-        let state = match &current_ctx {
-            $crate::application::AppContext::CLI(s) => s,
-            $crate::application::AppContext::IPC(_, s) => s
-        };
-
-        if let Ok(mut lock) = state.write() {
-            lock.step_details = Some(formatted_msg.clone());
-        }
-
-        match current_ctx {
-            $crate::application::AppContext::CLI(_) => {
-                tracing::$lvl!("{}", formatted_msg);
-            }
-            $crate::application::AppContext::IPC(tx, _) => {
-                tracing::$lvl!("{}", formatted_msg);
-                let event = $crate::ipc::protocol::IpcEvent {
-                    event_type: stringify!($lvl).to_string(),
-                    message: formatted_msg,
-                    percent: None,
-                    workflow: None
-                };
-
-                let _ = tx.try_send($crate::ipc::protocol::OutgoingMessage::Event(event));
-            }
-        }
-    }
 }

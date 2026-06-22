@@ -5,12 +5,11 @@ pub mod workflow;
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 use crate::ipc::protocol::OutgoingMessage;
-use state::SharedState;
 
 #[derive(Clone)]
 pub enum AppContext {
-    CLI(SharedState),
-    IPC(Sender<OutgoingMessage>, SharedState)
+    CLI(),
+    IPC(Sender<OutgoingMessage>)
 }
 
 tokio::task_local! {

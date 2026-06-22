@@ -5,11 +5,13 @@ use std::sync::LazyLock;
 use async_trait::async_trait;
 use regex::{Captures, Regex};
 use tokio::fs;
+use tracing::{error, info, warn};
 use crate::domain::errors::DiskError;
 use crate::domain::PARTITION_LABEL_LIVE;
 use crate::infrastructure::assets::{BOOT_X64_EFI, EXFAT_X64_EFI, NTFS_X64_EFI};
 use crate::infrastructure::CommandExt;
 use crate::infrastructure::windows::boot::BootStrategy;
+use crate::ipc::protocol::IPCEvent;
 use crate::telemetry;
 
 static BOOT_CONFIG_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| vec![
@@ -44,7 +46,7 @@ impl BootStrategy for UefiBootManager {
         let exfat_path = Path::new(&rufus_driver_dir).join("exfat_x64.efi");
         fs::write(&exfat_path, EXFAT_X64_EFI).await.map_err(DiskError::OsError)?;
 
-        telemetry!(info, "Embedded UEFI drivers successfully written to {}", efi_letter);
+        info!("Embedded UEFI drivers successfully written to {}", efi_letter);
         Ok(())
     }
 
@@ -69,7 +71,7 @@ impl BootStrategy for UefiBootManager {
             )));
         };
 
-        telemetry!(info, "Created new EFI boot entry: {}", guid);
+        info!("Created new EFI boot entry: {}", guid);
 
         let inherited_props = [
             "default", "displayorder", "toolsdisplayorder", "timeout", "resumeobject", "inherit", "locale"
@@ -84,7 +86,7 @@ impl BootStrategy for UefiBootManager {
                 .await;
         }
 
-        telemetry!(info, "Setting device=partition={} path={}", efi_drive, efi_path);
+        info!("Setting device=partition={} path={}", efi_drive, efi_path);
 
         let run_cmd = |args: Vec<String>| async move {
             let out = tokio::process::Command::new("bcdedit.exe")
@@ -122,7 +124,7 @@ impl BootStrategy for UefiBootManager {
         }.await;
 
         if let Err(e) = config_result {
-            telemetry!(error, "Error configuration boot entry: {}. Rolling back...", e);
+            error!("Error configuration boot entry: {}. Rolling back...", e);
             let _ = tokio::process::Command::new("bcdedit.exe")
                 .kill_on_drop(true)
                 .no_window()
@@ -133,7 +135,7 @@ impl BootStrategy for UefiBootManager {
             return Err(e);
         }
 
-        telemetry!(info, "UEFI boot entry created and set as default!");
+        info!("UEFI boot entry created and set as default!");
         Ok(())
     }
 
@@ -184,7 +186,8 @@ impl UefiBootManager {
         }
 
         if config_files.is_empty() {
-            telemetry!(warn, "Warning: No boot config files found to patch. This ISO might use an unknown bootloader.");
+            let msg = "No boot config files found to patch. This ISO might use an unknown bootloader.";
+            telemetry!(IPCEvent::Warning { message: msg.to_string() });
             return Ok(0);
         }
 
@@ -195,7 +198,7 @@ impl UefiBootManager {
             let original_content = match fs::read_to_string(&file_path).await {
                 Ok(c) => c,
                 Err(_) => {
-                    telemetry!(warn, "Warning: Could not read {:?} (might be a binary or locked)", display_name);
+                    warn!("Could not read {:?} (might be a binary or locked)", display_name);
                     continue;
                 }
             };
@@ -216,15 +219,15 @@ impl UefiBootManager {
 
             if file_was_patched {
                 if let Err(e) = fs::write(&file_path, &current_content).await {
-                    telemetry!(warn, "Warning: Failed to save patched config {:?} - {}", display_name, e);
+                    warn!("Failed to save patched config {:?} - {}", display_name, e)
                 } else {
-                    telemetry!(info, "Patched boot config: {:?}", display_name);
+                    info!("Patched boot config: {:?}", display_name);
                     patched_count += 1;
                 }
             }
         }
 
-        telemetry!(info, "Successfully patched {} boot config file(s) with label '{}'", patched_count, new_label);
+        info!("Successfully patched {} boot config file(s) with label '{}'", patched_count, new_label);
         Ok(patched_count)
     }
 }

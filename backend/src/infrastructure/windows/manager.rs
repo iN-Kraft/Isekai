@@ -5,19 +5,20 @@ use std::time::Duration;
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
+use tracing::{debug, error, info, warn};
 use windows_sys::Win32::System::SystemInformation::{FirmwareTypeUefi, GetFirmwareType};
 use crate::domain::errors::DiskError;
 use crate::domain::models::{Disk, Partition};
 use crate::domain::traits::DiskManager;
 use crate::infrastructure::windows::wmi::{BitLockerState, MsftDisk, MsftPartition, MsftPhysicalDisk, MsftVolume};
-use crate::infrastructure::windows::utils::{ParsingUtils, PartitionUtils};
+use crate::infrastructure::windows::utils::{PartitionUtils};
 use wmi::WMIConnection;
 use crate::application::spawn_blocking_with_context;
 use crate::domain::{PARTITION_LABEL_EFI, PARTITION_LABEL_LIVE};
 use crate::infrastructure::CommandExt;
 use crate::infrastructure::windows::bitlocker::BitLocker;
-use crate::infrastructure::windows::diskpart::run_diskpart_script;
-use crate::ipc::protocol::{IpcEvent, OutgoingMessage};
+use crate::infrastructure::windows::diskpart::DiskPart;
+use crate::ipc::protocol::{IPCEvent, OutgoingMessage};
 use crate::telemetry;
 
 pub struct WindowsDiskManager {
@@ -36,7 +37,7 @@ impl WindowsDiskManager {
     }
 
     pub async fn rollback_live_partitions(&self, disk_id: u32, _is_uefi: bool) -> Result<(), DiskError> {
-        telemetry!(info, "ROLLBACK: Purging incomplete partitions on disk {}", disk_id);
+        info!("ROLLBACK: Purging incomplete partitions on disk {}", disk_id);
 
         let dp_script = format!(
             "select disk {}\n\
@@ -47,7 +48,7 @@ impl WindowsDiskManager {
             exit\n",
             disk_id, PARTITION_LABEL_LIVE, PARTITION_LABEL_EFI
         );
-        crate::infrastructure::windows::diskpart::run_diskpart_script(&dp_script, format!("rollback_{}", disk_id)).await
+        DiskPart::run_script(&dp_script, format!("rollback_{}", disk_id)).await
     }
 
     async fn get_partitions_fresh(
@@ -64,7 +65,7 @@ impl WindowsDiskManager {
             if expected_partition_id.is_none() || partitions.iter().any(|p| p.id == expected_partition_id.unwrap()) {
                 return Ok(partitions);
             }
-            telemetry!(info, "Partition not found yet. Retrying in WMI sync loop...");
+            debug!("Partition not found yet. Retrying in WMI sync loop...");
         }
 
         Err(DiskError::DiskNotFound(
@@ -81,7 +82,7 @@ impl WindowsDiskManager {
         }
 
         let partition_style = if is_uefi { "gpt" } else { "mbr" };
-        telemetry!(step, format!("STRATEGY: WIPE DISK {} (Style: {})", disk_id, partition_style.to_uppercase()));
+        info!("STRATEGY: WIPE DISK {} (Style: {})", disk_id, partition_style.to_uppercase());
 
         let dp_script = format!(
             "select disk {}\n\
@@ -91,8 +92,7 @@ impl WindowsDiskManager {
             disk_id, partition_style
         );
 
-        crate::infrastructure::windows::diskpart::run_diskpart_script(&dp_script, format!("wipe_{}", disk_id)).await?;
-
+        DiskPart::run_script(&dp_script, format!("wipe_{}", disk_id)).await?;
         tokio::time::sleep(Duration::from_secs(3)).await;
 
         Ok(())
@@ -118,7 +118,7 @@ impl WindowsDiskManager {
                 disk_id, iso_payload_size_mb, PARTITION_LABEL_LIVE, efi_driver_size_mb, PARTITION_LABEL_EFI
             )
         } else {
-            telemetry!(info, "Legacy BIOS detected. Skipping FAT32 EFI partition creation to respect MBR limits.");
+            info!("Legacy BIOS detected. Skipping FAT32 EFI partition creation to respect MBR limits.");
             format!(
                 "select disk {}\n\
                 create partition primary size={}\n\
@@ -129,13 +129,13 @@ impl WindowsDiskManager {
             )
         };
 
-        telemetry!(step, format!("Creating Live Boot Partitions (NTFS Payload{})...", if is_uefi { " + FAT32 Driver Hook" } else { "" }));
-        crate::infrastructure::windows::diskpart::run_diskpart_script(&dp_script, format!("create_live_{}", disk_id)).await?;
+        info!("Creating Live Boot Partitions (NTFS Payload{})...", if is_uefi { " + FAT32 Driver Hook" } else { "" });
+        DiskPart::run_script(&dp_script, format!("create_live_{}", disk_id)).await?;
 
         let mut ntfs_letter = None;
         let mut fat32_letter = None;
 
-        telemetry!(info, "Waiting for Windows VDS to map drive letters...");
+        info!("Waiting for Windows VDS to map drive letters...");
 
         for _ in 0..6 {
             tokio::time::sleep(Duration::from_secs(2)).await;
@@ -160,7 +160,7 @@ impl WindowsDiskManager {
         }
 
         if ntfs_letter.is_none() || (is_uefi && fat32_letter.is_none()) {
-            telemetry!(warn, "WMI timeout mounting partitions. Executing rollback...");
+            warn!("WMI timeout mounting partitions. Executing rollback...");
             let _ = self.rollback_live_partitions(disk_id, is_uefi).await;
             return Err(DiskError::DiskNotFound("Failed to mount FAT32 partitions. WMI timeout.".into()));
         }
@@ -171,7 +171,7 @@ impl WindowsDiskManager {
             return Err(DiskError::DiskNotFound("Failed to mount FAT32 EFI partition. WMI timeout.".into()));
         }
 
-        telemetry!(info, "Partitions created! Payload: {}: | UEFI Hook: {:?}", ntfs_letter, fat32_letter);
+        info!("Partitions created! Payload: {}: | UEFI Hook: {:?}", ntfs_letter, fat32_letter);
 
         Ok((ntfs_letter, fat32_letter))
     }
@@ -233,7 +233,7 @@ impl WindowsDiskManager {
         } else {
             vec![letter, "/f", "/x"]
         };
-        telemetry!(info, "Running chkdsk repair on {} to clear volume errors...", letter);
+        info!("Running chkdsk repair on {} to clear volume errors...", letter);
 
         let output = Command::new("chkdsk.exe")
             .kill_on_drop(true)
@@ -250,12 +250,12 @@ impl WindowsDiskManager {
         // >2 = Could not fix online or fatal error
         if let Some(code) = output.status.code() {
             if code > 2 {
-                telemetry!(warn, "Chkdsk reported unfixable errors (Code: {}). The shrink operation might be rejected by Windows.", code);
+                warn!("Chkdsk reported unfixable errors (Code: {}). The shrink operation might be rejected by Windows.", code);
             } else {
-                telemetry!(info, "Filesystem check complete. Volume is clean.");
+                info!("Filesystem check complete. Volume is clean.");
             }
         } else {
-            telemetry!(warn, "Chkdsk terminated unexpectedly without an exit code.");
+            warn!("Chkdsk terminated unexpectedly without an exit code.");
         }
 
         Ok(())
@@ -266,7 +266,7 @@ impl WindowsDiskManager {
             let wmi_con = match WMIConnection::with_namespace_path("ROOT\\CIMV2") {
                 Ok(w) => w,
                 Err(e) => {
-                    telemetry!(error, "Failed to connect to WMI for hardware watcher: {}", e);
+                    error!("Failed to connect to WMI for hardware watcher: {}", e);
                     return;
                 }
             };
@@ -274,20 +274,20 @@ impl WindowsDiskManager {
             let iterator = match wmi_con.exec_notification_query(query) {
                 Ok(i) => i,
                 Err(e) => {
-                    telemetry!(error, "Failed to execute WMI event query: {}", e);
+                    error!("Failed to execute WMI event query: {}", e);
                     return;
                 }
             };
 
-            telemetry!(info, "Hardware watcher started. Listening for volume interrupts...");
+            info!("Hardware watcher started. Listening for volume interrupts...");
 
             for event in iterator {
                 match event {
                     Ok(_) => {
-                        telemetry!(info, "HardwareChanged");
+                        telemetry!(IPCEvent::SystemHardwareChanged);
                     }
                     Err(e) => {
-                        telemetry!(error, "WMI watcher event error: {}", e);
+                        error!("WMI watcher event error: {}", e);
                     }
                 }
             }
@@ -423,19 +423,19 @@ impl DiskManager for WindowsDiskManager {
         let partitions = self.get_partitions_fresh(disk_id, Some(partition_id)).await?;
         let target_part = partitions.iter().find(|p| p.id == partition_id).ok_or_else(|| DiskError::DiskNotFound(format!("Partition {} disappeared", partition_id)))?;
 
-        telemetry!(info, "Attempting primary shrink method: Resize-Partition");
+        info!("Attempting primary shrink method: Resize-Partition");
         let cmd_str = format!("Resize-Partition -DiskNumber {} -PartitionNumber {} -Size {}", disk_id, partition_id, target_size_bytes);
 
-        let output_fut = tokio::process::Command::new("powershell.exe")
+        let output_fut = Command::new("powershell.exe")
             .kill_on_drop(true)
             .no_window()
             .args(["-NoProfile", "-NonInteractive", "-Command", &cmd_str])
             .output();
 
-        let ps_output = tokio::time::timeout(std::time::Duration::from_secs(300), output_fut)
+        let ps_output = tokio::time::timeout(Duration::from_secs(300), output_fut)
             .await
-            .map_err(|_| DiskError::OsError(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
+            .map_err(|_| DiskError::OsError(Error::new(
+                ErrorKind::TimedOut,
                 "Resize-Partition timed out after 5 minutes",
             )))?
             .map_err(DiskError::OsError)?;
@@ -445,7 +445,7 @@ impl DiskManager for WindowsDiskManager {
             return Ok(());
         }
 
-        telemetry!(warn, "Resize-Partition failed. Attempting robust diskpart fallback...");
+        warn!("Resize-Partition failed. Attempting robust diskpart fallback...");
         let shrink_amount_bytes = target_part.size_bytes.saturating_sub(target_size_bytes);
         let shrink_amount_mb = shrink_amount_bytes / (1024 * 1024);
 
@@ -454,7 +454,7 @@ impl DiskManager for WindowsDiskManager {
             disk_id, partition_id, shrink_amount_mb
         );
 
-        crate::infrastructure::windows::diskpart::run_diskpart_script(&dp_script, format!("shrink_{}_{}", disk_id, partition_id)).await?;
+        DiskPart::run_script(&dp_script, format!("shrink_{}_{}", disk_id, partition_id)).await?;
         tokio::time::sleep(Duration::from_secs(10)).await;
 
         let fresh_parts = self.get_partitions_fresh(disk_id, Some(partition_id)).await?;
@@ -482,14 +482,14 @@ impl DiskManager for WindowsDiskManager {
         }
 
         if parts_to_delete.is_empty() {
-            telemetry!(warn, "No Isekai partitions found on disk {}. BCD was cleaned, but no disk space was reclaimed.", disk_id);
+            warn!("No Isekai partitions found on disk {}. BCD was cleaned, but no disk space was reclaimed.", disk_id);
             return Ok(());
         }
 
         parts_to_delete.sort_by_key(|p| Reverse(p.id.parse::<u32>().unwrap_or(0)));
 
         for p in parts_to_delete {
-            telemetry!(info, "Deleting partition {} (Label: '{}')...", p.id, p.label);
+            info!("Deleting partition {} (Label: '{}')...", p.id, p.label);
 
             let dp_script = format!(
                 "select disk {}\n\
@@ -498,7 +498,7 @@ impl DiskManager for WindowsDiskManager {
                 exit\n",
                 disk_id, p.id
             );
-            run_diskpart_script(&dp_script, format!("del_{}", p.id)).await?;
+            DiskPart::run_script(&dp_script, format!("del_{}", p.id)).await?;
         }
         tokio::time::sleep(Duration::from_secs(4)).await;
 
@@ -512,7 +512,7 @@ impl DiskManager for WindowsDiskManager {
         }
 
         if let Some(main) = main_part {
-            telemetry!(info, "Reclaiming unallocated space into main partition {}...", main.id);
+            info!("Reclaiming unallocated space into main partition {}...", main.id);
 
             let dp_script = format!(
                 "select disk {}\n\
@@ -522,13 +522,13 @@ impl DiskManager for WindowsDiskManager {
                 disk_id, main.id
             );
 
-            if let Err(e) = run_diskpart_script(&dp_script, format!("ext_{}", main.id)).await {
-                telemetry!(warn, "Could not extend partition. Space remains unallocated. ({})", e);
+            if let Err(e) = DiskPart::run_script(&dp_script, format!("ext_{}", main.id)).await {
+                warn!("Could not extend partition. Space remains unallocated. ({})", e);
             } else {
-                telemetry!(info, "Successfully extended main partition.");
+                info!("Successfully extended main partition.");
             }
         } else {
-            telemetry!(warn, "Could not confidently determine the main partition. Leaving space unallocated for safety.");
+            warn!("Could not confidently determine the main partition. Leaving space unallocated for safety.");
         }
 
         Ok(())

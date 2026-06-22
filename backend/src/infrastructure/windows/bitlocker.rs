@@ -1,4 +1,5 @@
 use std::io::{Error, ErrorKind};
+use tracing::{debug, error, info};
 use crate::domain::errors::DiskError;
 use crate::infrastructure::windows::wmi::{BitLockerState, EncryptableVolume};
 use wmi::{AuthLevel, Variant, WMIConnection};
@@ -16,6 +17,8 @@ impl BitLocker {
         };
 
         let target_drive = letter.to_string();
+        debug!("Querying BitLocker WMI state for drive {}...", target_drive);
+
         let state = spawn_blocking_with_context(move || -> Result<BitLockerState, DiskError> {
             let wmi_con = WMIConnection::with_namespace_path("ROOT\\CIMV2\\Security\\MicrosoftVolumeEncryption")
                 .map_err(|e| DiskError::WmiError(format!("Failed to connect to BitLocker WMI: {}", e)))?;
@@ -42,7 +45,7 @@ impl BitLocker {
                         Variant::UI8(val) => val as u32,
                         Variant::I8(val) => val as u32,
                         _ => {
-                            telemetry!(error, "Unexpected Variant type for LockStatus: {:?}", lock_variant);
+                            error!("Unexpected Variant type for LockStatus: {:?}", lock_variant);
                             0
                         }
                     };
@@ -60,11 +63,14 @@ impl BitLocker {
             Ok(BitLockerState::Unprotected)
         }).await.map_err(|e| DiskError::DataValidation(format!("Thread Pool crashed: {}", e)))??;
 
+        debug!("BitLocker state for {}: {:?}", letter, state);
         Ok(state)
     }
 
     pub async fn prompt_unlock(drive_letter: &str) -> Result<(), DiskError> {
         let letter = drive_letter.trim_end_matches('\\');
+        info!("Spawning BitLocker unlock prompt for drive {}...", letter);
+
         let mut child = tokio::process::Command::new("bdeunlock.exe")
             .kill_on_drop(true)
             .no_window()
@@ -84,6 +90,8 @@ impl BitLocker {
 
     pub async fn suspend(drive_letter: &str) -> Result<(), DiskError> {
         let letter = drive_letter.trim_end_matches('\\');
+        info!("Suspending BitLocker protection on drive {}...", letter);
+
         let output = tokio::process::Command::new("manage-bde.exe")
             .kill_on_drop(true)
             .no_window()

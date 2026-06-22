@@ -6,7 +6,6 @@ pub mod boot;
 pub mod iso_manager;
 pub mod payload_manager;
 pub mod bitlocker;
-pub mod planner;
 pub mod manager;
 pub mod saga;
 

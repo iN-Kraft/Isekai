@@ -4,6 +4,7 @@ use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
 use tokio::time::interval;
+use tracing::{info, warn};
 use crate::application::spawn_blocking_with_context;
 use crate::domain::errors::DiskError;
 use crate::infrastructure::CommandExt;
@@ -12,13 +13,17 @@ use crate::telemetry;
 pub struct PayloadManager;
 
 impl PayloadManager {
-    pub async fn copy_payload(source_drive_letter: &str, target_drive_letter: &str, is_hdd: bool) -> Result<(), DiskError> {
+    pub async fn copy_payload(
+        source_drive_letter: &str,
+        target_drive_letter: &str,
+        is_hdd: bool,
+        mut on_progress: Option<impl FnMut(u64, u64)>
+    ) -> Result<(), DiskError> {
         let source = format!("{}:\\", source_drive_letter.trim_end_matches(':'));
         let target = format!("{}:\\", target_drive_letter.trim_end_matches(':'));
         let mt_flag = if is_hdd { "/MT:1" } else { "/MT:8" };
 
-        telemetry!(step, "Preparing OS Payload");
-        telemetry!(info, "Calculating payload size for {}...", source);
+        info!("Calculating payload size for {}...", source);
 
         let source_path = source.clone();
         let total_bytes = spawn_blocking_with_context(move || Self::get_dir_size(source_path))
@@ -29,8 +34,7 @@ impl PayloadManager {
             return Err(DiskError::DataValidation("Source ISO appears to be empty!".into()));
         }
 
-        telemetry!(step, "Cloning OS Payload");
-        telemetry!(info, "Starting high-speed payload copy (Mode: {})", mt_flag);
+        info!("Starting high-speed payload copy (Mode: {})", mt_flag);
 
         let mut child = Command::new("robocopy")
             .kill_on_drop(true)
@@ -53,7 +57,10 @@ impl PayloadManager {
 
         let mut ticker = interval(Duration::from_millis(500));
         let mut last_percent = 0u8;
-        telemetry!(progress, last_percent, "{:.2} GB / {:.2} GB", 0f64, total_bytes as f64 / 1_073_741_824.0);
+
+        if let Some(ref mut cb) = on_progress {
+            cb(0, total_bytes);
+        }
 
         let exit_status = loop {
             tokio::select! {
@@ -70,13 +77,9 @@ impl PayloadManager {
                     let raw_percent = (current_bytes as f64 / total_bytes as f64 * 100.0).clamp(0.0, 100.0) as u8;
 
                     if raw_percent > last_percent {
-                        telemetry!(
-                            progress,
-                            raw_percent,
-                            "{:.2} GB / {:.2} GB",
-                            current_bytes as f64 / 1_073_741_824.0,
-                            total_bytes as f64 / 1_073_741_824.0
-                        );
+                        if let Some(ref mut cb) = on_progress {
+                            cb(current_bytes, total_bytes);
+                        }
                         last_percent = raw_percent
                     }
                 }
@@ -97,16 +100,14 @@ impl PayloadManager {
             )));
         }
 
-        telemetry!(info, "Payload copy completed successfully!");
-
+        info!("Payload copy completed successfully!");
         Self::strip_readonly_attributes(&target).await?;
 
         Ok(())
     }
 
     async fn strip_readonly_attributes(target_path: &str) -> Result<(), DiskError> {
-        telemetry!(step, "Finalizing File Permissions");
-        telemetry!(info, "Stripping read-only attributes from copied files...");
+        info!("Stripping read-only attributes from copied files...");
 
         let target_glob = format!("{}*", target_path);
         let status = Command::new("attrib")
@@ -120,9 +121,9 @@ impl PayloadManager {
             .map_err(DiskError::OsError)?;
 
         if !status.success() {
-            telemetry!(warn, "Note: Some systems files denied attribute changes (this is normal).");
+            warn!("Note: Some systems files denied attribute changes (this is normal).");
         } else {
-            telemetry!(info, "Read-only attributes removed.");
+            info!("Read-only attributes removed.");
         }
 
         Ok(())

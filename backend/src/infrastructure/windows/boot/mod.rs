@@ -4,6 +4,7 @@ pub mod sniffer;
 
 use async_trait::async_trait;
 use tokio::process::Command;
+use tracing::info;
 use crate::domain::errors::DiskError;
 use crate::infrastructure::CommandExt;
 use crate::infrastructure::windows::boot::legacy::LegacyBootManager;
@@ -29,7 +30,7 @@ impl BootManager {
     }
 
     pub async fn remove_isekai_boot_entries(distro_name: &str) -> Result<(), DiskError> {
-        telemetry!(info, "Scanning Windows Boot Manager for '{}' entries...", distro_name);
+        info!("Scanning Windows Boot Manager for '{}' entries...", distro_name);
 
         let out = Command::new("bcdedit.exe")
             .kill_on_drop(true)
@@ -65,12 +66,12 @@ impl BootManager {
         }
 
         if guids_to_delete.is_empty() {
-            telemetry!(info, "No active boot entries found for '{}'", distro_name);
+            info!("No active boot entries found for '{}'", distro_name);
             return Ok(());
         }
 
         for guid in guids_to_delete {
-            telemetry!(info, "Deleting BCD entry: {}", guid);
+            info!("Deleting BCD entry: {}", guid);
 
             let _ = Command::new("bcdedit.exe")
                 .kill_on_drop(true)

@@ -1,6 +1,7 @@
 use tokio::process::Command;
+use tracing::{error, info};
 use crate::infrastructure::{CommandExt, NativeDiskManager};
-use crate::infrastructure::windows::diskpart::run_diskpart_script;
+use crate::infrastructure::windows::diskpart::DiskPart;
 use crate::telemetry;
 
 #[derive(Debug)]
@@ -24,18 +25,18 @@ impl SagaOrchestrator {
     }
 
     pub async fn abort(self, native_manager: &NativeDiskManager) {
-        telemetry!(error, "CRITICAL: Initiating Saga Rollback...");
+        error!("CRITICAL: Initiating Saga Rollback...");
 
         for rollback in self.rollbacks.into_iter().rev() {
             match rollback {
                 Compensation::DeletePartitions { disk_id, is_uefi } => {
-                    telemetry!(info, "Saga Step: Deleting incomplete partitions...");
+                    info!("Saga Step: Deleting incomplete partitions...");
                     if let Err(e) = native_manager.rollback_live_partitions(disk_id, is_uefi).await {
-                        telemetry!(error, "Failed to delete partitions during rollback: {}", e);
+                        error!("Failed to delete partitions during rollback: {}", e);
                     }
                 }
                 Compensation::ExtendSystemPartition { disk_id, partition_id } => {
-                    telemetry!(info, "Saga Step: Extending Windows partition back to original size...");
+                    info!("Saga Step: Extending Windows partition back to original size...");
                     let extend_script = format!(
                         "select disk {}\n\
                         select partition {}\n\
@@ -44,15 +45,15 @@ impl SagaOrchestrator {
                         disk_id, partition_id
                     );
 
-                    if let Err(e) = run_diskpart_script(
+                    if let Err(e) = DiskPart::run_script(
                         &extend_script,
                         format!("extend_{}", disk_id)
                     ).await {
-                        telemetry!(error, "Failed to extend partition during rollback: {}", e);
+                        error!("Failed to extend partition during rollback: {}", e);
                     }
                 }
                 Compensation::RestoreBcdBackup { backup_path } => {
-                    telemetry!(info, "Saga Step: Restoring Windows BCD from backup...");
+                    info!("Saga Step: Restoring Windows BCD from backup...");
                     let output = Command::new("bcdedit.exe")
                         .kill_on_drop(true)
                         .no_window()
@@ -63,13 +64,13 @@ impl SagaOrchestrator {
                     match output {
                         Ok(out) if !out.status.success() => {
                             let stderr = String::from_utf8_lossy(&out.stderr);
-                            telemetry!(error, "Failed to restore BCD backup: {}", stderr);
+                            error!("Failed to restore BCD backup: {}", stderr);
                         }
                         Err(e) => {
-                            telemetry!(error, "Failed to execute bcdedit for restore: {}", e);
+                            error!("Failed to execute bcdedit for restore: {}", e);
                         },
                         _ => {
-                            telemetry!(info, "Windows BCD restored successfully.");
+                            info!("Windows BCD restored successfully.");
                             let _ = tokio::fs::remove_file(&backup_path).await;
                         }
                     }
@@ -77,6 +78,6 @@ impl SagaOrchestrator {
             }
         }
 
-        telemetry!(info, "Saga Rollback completed.");
+        info!("Saga Rollback completed.");
     }
 }

@@ -1,6 +1,3 @@
-use std::sync::OnceLock;
-use regex::Regex;
-
 pub struct PartitionUtils;
 
 impl PartitionUtils {
@@ -32,20 +29,5 @@ impl PartitionUtils {
         }
 
         "Partition".to_string()
-    }
-}
-
-pub struct ParsingUtils;
-
-impl ParsingUtils {
-    pub fn parse_chkdsk_progress(line: &str) -> Option<u8> {
-        static RE: OnceLock<Regex> = OnceLock::new();
-        let re = RE.get_or_init(|| Regex::new(r"(\d+)\s*%").unwrap());
-
-        re.captures_iter(line)
-            .last()
-            .and_then(|cap| cap.get(1))
-            .and_then(|m| m.as_str().parse::<u8>().ok())
-            .filter(|&num| num <= 100)
     }
 }

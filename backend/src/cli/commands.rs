@@ -17,8 +17,6 @@ pub struct IsekaiCli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Check if required system packages are available
-    Check,
     /// List all available physical disks
     List,
     /// List partitions for a specific disk
