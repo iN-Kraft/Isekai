@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use crate::infrastructure::windows::wmi::BitLockerState;
 
@@ -32,4 +33,21 @@ pub struct InstallPlan {
     pub has_requested_linux_space: bool,
     pub boot_partition_offset_bytes: u64,
     pub linux_space_bytes: u64
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DistroConfig {
+    pub version: String,
+    pub mirrors: Vec<String>,
+    pub checksum: String,
+    pub secure_boot: bool
+}
+
+pub type RemoteConfig = HashMap<String, DistroConfig>;
+
+#[derive(Serialize, Debug)]
+pub struct PublicConfig {
+    pub available: bool,
+    pub version: String,
+    pub secure_boot: bool
 }

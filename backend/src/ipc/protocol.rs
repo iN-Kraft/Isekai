@@ -1,5 +1,6 @@
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use crate::domain::models::{Disk, Partition};
+use crate::domain::models::{Disk, Partition, PublicConfig};
 use crate::application::state::{WorkflowType};
 use crate::define_telemetry;
 
@@ -10,6 +11,7 @@ pub enum IPCRequest {
     GetPartitions { id: String, disk_id: String },
     UnlockBitlocker { id: String, drive_letter: String },
     SuspendBitlocker { id: String, drive_letter: String },
+    GetDistroInfo { id: String },
 
     ShrinkInstallLocal {
         id: String,
@@ -25,6 +27,7 @@ pub enum IPCRequest {
 pub enum ResponseData {
     Disks(Vec<Disk>),
     Partitions(Vec<Partition>),
+    DistroInfo(HashMap<String, PublicConfig>),
     Empty,
 }
 

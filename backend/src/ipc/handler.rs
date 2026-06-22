@@ -9,6 +9,7 @@ use crate::application::workflow::shrink_install_local::ShrinkInstallWorkflow;
 use crate::application::workflow::uninstall::{UninstallWorkflow};
 use crate::application::workflow::WorkflowRunner;
 use crate::domain::errors::DiskError;
+use crate::infrastructure::network::NetworkManager;
 use crate::infrastructure::windows::boot::BootManager;
 use crate::telemetry;
 
@@ -68,6 +69,17 @@ pub async fn process_request(
                     }
                 }
                 Err(e) => build_error(&id, e.to_string())
+            }
+        }
+
+        IPCRequest::GetDistroInfo { id } => {
+            let info_map = NetworkManager::get_public_config().await;
+
+            IPCResponse {
+                id: id.clone(),
+                success: true,
+                data: Some(ResponseData::DistroInfo(info_map)),
+                error: None
             }
         }
 

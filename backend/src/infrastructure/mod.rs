@@ -4,6 +4,7 @@ pub use windows::WindowsDiskManager as NativeDiskManager;
 
 pub mod assets;
 pub mod logger;
+pub mod network;
 
 pub trait CommandExt {
     fn no_window(&mut self) -> &mut Self;
