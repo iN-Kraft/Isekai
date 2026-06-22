@@ -11,7 +11,7 @@ macro_rules! define_telemetry {
     ) => {
         $(#[$router])*
         #[derive(serde::Serialize, Debug, Clone)]
-        #[serde(tag = "event_type")]
+        #[serde(tag = "type")]
         pub enum $enum_name {
             $(
                 $variant $({ $($field: $ftype),* })*

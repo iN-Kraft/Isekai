@@ -3,12 +3,10 @@ package dev.datlag.isekai.module
 import dev.datlag.isekai.ipc.IPCTransport
 import dev.datlag.isekai.repository.DiskRepository
 import dev.datlag.isekai.repository.InstallRepository
-import dev.datlag.isekai.repository.SystemRepository
 import dev.datlag.isekai.viewmodel.ConnectionViewModel
 import dev.datlag.isekai.viewmodel.DiskViewModel
 import dev.datlag.isekai.viewmodel.FileSelectViewModel
 import dev.datlag.isekai.viewmodel.InstallViewModel
-import dev.datlag.isekai.viewmodel.SystemViewModel
 import kotlinx.coroutines.CoroutineScope
 import org.kodein.di.DI
 import org.kodein.di.bindFactory
@@ -22,17 +20,12 @@ object AppModule {
         bindSingleton<IPCTransport> {
             IPCTransport(daemonLauncher = instance())
         }
-        
-        bindSingleton { SystemRepository(instance()) }
+
         bindSingleton { DiskRepository(instance()) }
         bindSingleton { InstallRepository(instance()) }
 
         bindFactory<CoroutineScope, ConnectionViewModel> { scope ->
             ConnectionViewModel(directDI = this, viewModelScope = scope)
-        }
-
-        bindFactory<CoroutineScope, SystemViewModel> { scope ->
-            SystemViewModel(directDI = this, viewModelScope = scope)
         }
 
         bindFactory<CoroutineScope, DiskViewModel> { scope ->

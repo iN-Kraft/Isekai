@@ -64,10 +64,6 @@ class IPCTransport(
         classDiscriminator = "type"
     }
 
-    private val requestJson = Json {
-        classDiscriminator = "method"
-    }
-
     private var pipeHandle: HANDLE? = null
     private var readJob: Job? = null
 
@@ -318,7 +314,7 @@ class IPCTransport(
     }
 
     context(_: Raise<IPCError>)
-    suspend fun <T : IpcRequest> send(request: T): OutgoingMessage.Response {
+    suspend fun <T : IPCRequest> send(request: T): OutgoingMessage.Response {
         val handle = ensureNotNull(pipeHandle) {
             IPCError.Disconnected("Not connected to backend.")
         }
@@ -329,7 +325,7 @@ class IPCTransport(
         }
 
         val sendResult = Either.catch {
-            val jsonString = requestJson.encodeToString(IpcRequest.serializer(), request)
+            val jsonString = json.encodeToString(IPCRequest.serializer(), request)
             val payloadBytes = jsonString.encodeToByteArray()
             val payloadSize = payloadBytes.size
 

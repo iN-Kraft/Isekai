@@ -17,7 +17,7 @@ use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 use windows_sys::Win32::System::Threading::{OpenEventW, SetEvent, EVENT_MODIFY_STATE};
 use crate::application::{AppContext, APP_CONTEXT};
 use crate::ipc::handler::process_request;
-use crate::ipc::protocol::{IpcRequest, OutgoingMessage};
+use crate::ipc::protocol::{IPCRequest, OutgoingMessage};
 use crate::infrastructure::windows::WindowsDiskManager;
 
 pub(crate) const PIPE_NAME: &str = r"\\.\pipe\isekai_daemon";
@@ -126,7 +126,7 @@ impl IpcServer {
                     match result {
                         Ok(bytes_mut) => {
                             if let Ok(line) = String::from_utf8(bytes_mut.to_vec()) {
-                                if let Ok(req) = serde_json::from_str::<IpcRequest>(&line) {
+                                if let Ok(req) = serde_json::from_str::<IPCRequest>(&line) {
                                     tasks_tracker.fetch_add(1, Ordering::SeqCst);
 
                                     let tx_clone = tx.clone();

@@ -1,9 +1,10 @@
 package dev.datlag.isekai.viewmodel
 
 import arrow.core.raise.fold
-import dev.datlag.isekai.ipc.Disk
 import dev.datlag.isekai.ipc.IPCError
-import dev.datlag.isekai.ipc.Partition
+import dev.datlag.isekai.ipc.IPCEvent
+import dev.datlag.isekai.ipc.model.Disk
+import dev.datlag.isekai.ipc.model.Partition
 import dev.datlag.isekai.repository.DiskRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,7 +33,7 @@ class DiskViewModel(
 
         viewModelScope.launch {
             repository.events.collect { event ->
-                if (event.message == "HardwareChanged") {
+                if (event.payload is IPCEvent.SystemHardwareChanged) {
                     loadData()
                 }
             }

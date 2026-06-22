@@ -10,8 +10,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import dev.datlag.isekai.ipc.BitLockerState
-import dev.datlag.isekai.ipc.Partition
+import dev.datlag.isekai.ipc.model.BitlockerState
 import dev.datlag.isekai.navigation.component.NewComboRow
 import dev.datlag.isekai.viewmodel.DiskViewModel
 import dev.datlag.isekai.viewmodel.kodeinViewModel
@@ -65,10 +64,10 @@ fun BlueprintScreen(
         state.partitionState.selectedIndex ?: 0
     }
     val bitlockerState = remember(state.partitionState.partitions, selectedPartitionIndex) {
-        state.partitionState.partitions.getOrNull(selectedPartitionIndex)?.bitlockerState ?: BitLockerState.Unprotected
+        state.partitionState.partitions.getOrNull(selectedPartitionIndex)?.bitlockerState ?: BitlockerState.Unprotected
     }
     var isBitLockerActive by remember(bitlockerState) {
-        mutableStateOf(bitlockerState != BitLockerState.Unprotected)
+        mutableStateOf(bitlockerState != BitlockerState.Unprotected)
     }
 
     val diskModel = remember(state.diskState.disks) {
@@ -102,21 +101,21 @@ fun BlueprintScreen(
 
             Banner(
                 title = when (bitlockerState) {
-                    BitLockerState.Locked -> "Drive is locked with BitLocker."
-                    BitLockerState.Protected -> "Drive is protected on reboot."
-                    BitLockerState.Unprotected -> ""
+                    BitlockerState.Locked -> "Drive is locked with BitLocker."
+                    BitlockerState.Protected -> "Drive is protected on reboot."
+                    BitlockerState.Unprotected -> ""
                 },
                 revealed = isBitLockerActive,
                 buttonLabel = when (bitlockerState) {
-                    BitLockerState.Locked -> "Unlock"
-                    BitLockerState.Protected -> "Suspend"
-                    BitLockerState.Unprotected -> null
+                    BitlockerState.Locked -> "Unlock"
+                    BitlockerState.Protected -> "Suspend"
+                    BitlockerState.Unprotected -> null
                 },
                 buttonStyle = BannerButtonStyle.SUGGESTED,
                 onButtonClicked = {
                     when (bitlockerState) {
-                        BitLockerState.Locked -> diskViewModel.unlockBitlocker()
-                        BitLockerState.Protected -> diskViewModel.suspendBitlocker()
+                        BitlockerState.Locked -> diskViewModel.unlockBitlocker()
+                        BitlockerState.Protected -> diskViewModel.suspendBitlocker()
                         else -> { }
                     }
                 }

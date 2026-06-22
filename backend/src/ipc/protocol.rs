@@ -4,31 +4,24 @@ use crate::application::state::{WorkflowType};
 use crate::define_telemetry;
 
 #[derive(Deserialize, Debug)]
-#[serde(tag = "method")]
-pub enum IpcProtocol {
-    GetDisks,
-    GetPartitions { disk_id: String },
-    UnlockBitlocker { drive_letter: String },
-    SuspendBitlocker { drive_letter: String },
+#[serde(tag = "type")]
+pub enum IPCRequest {
+    GetDisks { id: String },
+    GetPartitions { id: String, disk_id: String },
+    UnlockBitlocker { id: String, drive_letter: String },
+    SuspendBitlocker { id: String, drive_letter: String },
+
     ShrinkInstallLocal {
+        id: String,
         disk_id: String,
         partition_id: String,
         iso_path: String
     },
-    Uninstall {
-        disk_id: String
-    }
-}
-
-#[derive(Deserialize, Debug)]
-pub struct IpcRequest {
-    pub id: String,
-    #[serde(flatten)]
-    pub payload: IpcProtocol,
+    Uninstall { id: String, disk_id: String }
 }
 
 #[derive(Serialize, Debug)]
-#[serde(untagged)]
+#[serde(tag = "type", content = "payload")]
 pub enum ResponseData {
     Disks(Vec<Disk>),
     Partitions(Vec<Partition>),
@@ -36,7 +29,7 @@ pub enum ResponseData {
 }
 
 #[derive(Serialize, Debug)]
-pub struct IpcResponse {
+pub struct IPCResponse {
     pub id: String,
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -96,6 +89,6 @@ define_telemetry! {
 #[derive(Serialize, Debug)]
 #[serde(tag = "type")]
 pub enum OutgoingMessage {
-    Response(IpcResponse),
+    Response(IPCResponse),
     Event { payload: IPCEvent },
 }

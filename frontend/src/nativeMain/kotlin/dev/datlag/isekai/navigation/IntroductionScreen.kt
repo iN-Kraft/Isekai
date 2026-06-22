@@ -11,7 +11,6 @@ import dev.datlag.isekai.navigation.component.DefaultScreen
 import dev.datlag.isekai.navigation.model.IntroSlide
 import dev.datlag.isekai.translation.Introduction
 import dev.datlag.isekai.viewmodel.ConnectionViewModel
-import dev.datlag.isekai.viewmodel.SystemViewModel
 import dev.datlag.isekai.viewmodel.kodeinViewModel
 import dev.datlag.kommons.adwaita.compose.component.ButtonContent
 import dev.datlag.kommons.adwaita.compose.component.StatusPage
