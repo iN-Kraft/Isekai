@@ -33,6 +33,12 @@ sealed interface IPCRequest {
     ) : IPCRequest
 
     @Serializable
+    @SerialName("GetDistroInfo")
+    data class GetDistroInfo(
+        override val id: String
+    ) : IPCRequest
+
+    @Serializable
     @SerialName("ShrinkInstallLocal")
     data class ShrinkInstallLocal(
         override val id: String,

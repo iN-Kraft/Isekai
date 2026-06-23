@@ -1,5 +1,6 @@
 package dev.datlag.isekai.navigation.model
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -9,17 +10,40 @@ data class DistroList(
 ) {
 
     @Serializable
-    data class Distro(
-        val name: String,
-        val tagline: String,
-        val editions: List<Edition>
-    ) {
+    data class PublicConfig(
+        val available: Boolean = false,
+        val version: String = "",
+        @SerialName("secure_boot") val secureBoot: Boolean = false
+    )
+
+    @Serializable
+    sealed interface Distro {
+        val name: String
+        val tagline: String
 
         @Serializable
-        data class Edition(
-            val name: String,
-            val description: String
-        )
+        data class Standalone(
+            override val name: String,
+            override val tagline: String,
+            val id: String,
+            val config: PublicConfig = PublicConfig()
+        ) : Distro
+
+        @Serializable
+        data class WithEditions(
+            override val name: String,
+            override val tagline: String,
+            val editions: List<Edition>
+        ) : Distro {
+
+            @Serializable
+            data class Edition(
+                val name: String,
+                val description: String,
+                val id: String,
+                val config: PublicConfig = PublicConfig()
+            )
+        }
     }
 
     companion object {
@@ -28,17 +52,19 @@ data class DistroList(
                 DistroList(
                     groupName = "Fedora Base",
                     groupList = listOf(
-                        Distro(
+                        Distro.WithEditions(
                             name = "Fedora",
                             tagline = "It's your Operating System.",
                             editions = listOf(
-                                Distro.Edition(
+                                Distro.WithEditions.Edition(
                                     name = "GNOME",
-                                    description = "The leading Linux desktop"
+                                    description = "The leading Linux desktop",
+                                    id = "fedora-gnome"
                                 ),
-                                Distro.Edition(
+                                Distro.WithEditions.Edition(
                                     name = "KDE",
-                                    description = "The next generation personal desktop"
+                                    description = "The next generation personal desktop",
+                                    id = "fedora-kde"
                                 )
                             )
                         )
@@ -47,35 +73,40 @@ data class DistroList(
                 DistroList(
                     groupName = "Ubuntu Base",
                     groupList = listOf(
-                        Distro(
+                        Distro.WithEditions(
                             name = "Linux Mint",
                             tagline = "A comfortable, familiar workflow.",
                             editions = listOf(
-                                Distro.Edition(
+                                Distro.WithEditions.Edition(
                                     name = "Cinnamon",
-                                    description = "Sleek, modern, innovative"
+                                    description = "Sleek, modern, innovative",
+                                    id = "linux-mint-cinnamon"
                                 ),
-                                Distro.Edition(
+                                Distro.WithEditions.Edition(
                                     name = "Xfce",
-                                    description = "Light, simple, efficient"
+                                    description = "Light, simple, efficient",
+                                    id = "linux-mint-xfce"
                                 ),
-                                Distro.Edition(
+                                Distro.WithEditions.Edition(
                                     name = "MATE",
-                                    description = "Classic, traditional"
+                                    description = "Classic, traditional",
+                                    id = "linux-mint-mate"
                                 )
                             )
                         ),
-                        Distro(
+                        Distro.WithEditions(
                             name = "Zorin OS",
                             tagline = "Windows Style",
                             editions = listOf(
-                                Distro.Edition(
+                                Distro.WithEditions.Edition(
                                     name = "Core",
-                                    description = "For basic use."
+                                    description = "For basic use.",
+                                    id = "zorin-os-core"
                                 ),
-                                Distro.Edition(
+                                Distro.WithEditions.Edition(
                                     name = "Education",
-                                    description = "With educational software for schools and students."
+                                    description = "With educational software for schools and students.",
+                                    id = "zorin-os-education"
                                 )
                             )
                         )
@@ -89,35 +120,40 @@ data class DistroList(
                 DistroList(
                     groupName = "Fedora Base",
                     groupList = listOf(
-                        Distro(
+                        Distro.WithEditions(
                             name = "Bazzite",
                             tagline = "Pre-configured for Steam.",
                             editions = listOf(
-                                Distro.Edition(
+                                Distro.WithEditions.Edition(
                                     name = "GNOME",
-                                    description = "The leading Linux desktop"
+                                    description = "The leading Linux desktop",
+                                    id = "bazzite-gnome"
                                 ),
-                                Distro.Edition(
+                                Distro.WithEditions.Edition(
                                     name = "KDE",
-                                    description = "The next generation personal desktop"
+                                    description = "The next generation personal desktop",
+                                    id = "bazzite-kde"
                                 )
                             )
                         ),
-                        Distro(
+                        Distro.WithEditions(
                             name = "Nobara",
                             tagline = "Fedora with gaming tweaks.",
                             editions = listOf(
-                                Distro.Edition(
+                                Distro.WithEditions.Edition(
                                     name = "Official",
-                                    description = "The main Nobara experience."
+                                    description = "The main Nobara experience.",
+                                    id = "nobara-official"
                                 ),
-                                Distro.Edition(
+                                Distro.WithEditions.Edition(
                                     name = "GNOME",
-                                    description = "Clean GNOME layout with a focus on content."
+                                    description = "Clean GNOME layout with a focus on content.",
+                                    id = "nobara-gnome"
                                 ),
-                                Distro.Edition(
+                                Distro.WithEditions.Edition(
                                     name = "KDE",
-                                    description = "Classic KDE experience with deep customization for power users."
+                                    description = "Classic KDE experience with deep customization for power users.",
+                                    id = "nobara-kde"
                                 )
                             )
                         )
@@ -126,10 +162,10 @@ data class DistroList(
                 DistroList(
                     groupName = "Arch Base",
                     groupList = listOf(
-                        Distro(
+                        Distro.Standalone(
                             name = "CachyOS",
                             tagline = "Performance-First Linux",
-                            editions = emptyList()
+                            id = "cachyos"
                         )
                     )
                 )

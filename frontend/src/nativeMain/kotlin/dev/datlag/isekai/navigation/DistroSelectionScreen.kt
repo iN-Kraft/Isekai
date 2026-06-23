@@ -1,6 +1,7 @@
 package dev.datlag.isekai.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -8,6 +9,7 @@ import androidx.compose.runtime.setValue
 import dev.datlag.isekai.navigation.component.DefaultScreen
 import dev.datlag.isekai.navigation.model.DistroList
 import dev.datlag.isekai.translation.DistroSelection
+import dev.datlag.isekai.viewmodel.DistroViewModel
 import dev.datlag.isekai.viewmodel.FileSelectViewModel
 import dev.datlag.isekai.viewmodel.kodeinViewModel
 import dev.datlag.kommons.adwaita.ViewSwitcherPolicy
@@ -39,6 +41,7 @@ import dev.datlag.kommons.gtk.gio.measureDiskUsage
 fun DistroSelectionScreen(
     onSelected: (Screen.BlueprintScreen) -> Unit
 ) {
+    val distroViewModel = kodeinViewModel<DistroViewModel>()
     var selectedTab by remember { mutableStateOf("desktop") }
     val viewStackState = rememberViewStackState()
 
@@ -58,8 +61,10 @@ fun DistroSelectionScreen(
                     title = DESKTOP,
                     iconName = "computer-symbolic"
                 ) {
+                    val distroList by distroViewModel.desktopDistros.collectAsState()
+
                     DistroListView(
-                        DistroList.desktop,
+                        distroList,
                         onSelect = onSelected,
                         onLocalSelect = { file ->
                             val filePath = file.peekPath()?.ifBlank { null } ?: file.getPath()?.ifBlank { null }
@@ -81,8 +86,10 @@ fun DistroSelectionScreen(
                     title = GAMING,
                     iconName = "input-gaming-symbolic"
                 ) {
+                    val distroList by distroViewModel.gamingDistros.collectAsState()
+
                     DistroListView(
-                        DistroList.gaming,
+                        distroList,
                         onSelect = onSelected,
                         onLocalSelect = { file ->
                             val filePath = file.peekPath()?.ifBlank { null } ?: file.getPath()?.ifBlank { null }
@@ -116,51 +123,56 @@ private fun DistroListView(
                     title = distroGroup.groupName
                 ) {
                     distroGroup.groupList.forEach { distro ->
-                        if (distro.editions.isEmpty()) {
-                            ActionRow(
-                                title = distro.name,
-                                subtitle = distro.tagline,
-                                suffix = {
-                                    Button(
-                                        modifier = Modifier.css("suggested-action").alignVertical(Align.CENTER),
-                                        onClick = {
-                                            onSelect(
-                                                Screen.BlueprintScreen.Download(
-                                                    name = distro.name,
-                                                    edition = null
-                                                )
-                                            )
-                                        }
-                                    ) {
-                                        ButtonContent(label = DOWNLOAD, iconName = "folder-download-symbolic")
-                                    }
-                                }
-                            )
-                        } else {
-                            ExpanderRow(
-                                title = distro.name,
-                                subtitle = distro.tagline
-                            ) {
-                                distro.editions.forEach { edition ->
-                                    ActionRow(
-                                        title = edition.name,
-                                        subtitle = edition.description,
-                                        suffix = {
-                                            Button(
-                                                modifier = Modifier.css("suggested-action").alignVertical(Align.CENTER),
-                                                onClick = {
-                                                    onSelect(
-                                                        Screen.BlueprintScreen.Download(
-                                                            name = distro.name,
-                                                            edition = edition.name
-                                                        )
+                        when (distro) {
+                            is DistroList.Distro.Standalone -> {
+                                ActionRow(
+                                    title = distro.name,
+                                    subtitle = distro.tagline,
+                                    suffix = {
+                                        Button(
+                                            modifier = Modifier.css("suggested-action").alignVertical(Align.CENTER),
+                                            onClick = {
+                                                onSelect(
+                                                    Screen.BlueprintScreen.Download(
+                                                        name = distro.name,
+                                                        edition = null
                                                     )
-                                                }
-                                            ) {
-                                                ButtonContent(label = DOWNLOAD, iconName = "folder-download-symbolic")
-                                            }
+                                                )
+                                            },
+                                            enabled = distro.config.available
+                                        ) {
+                                            ButtonContent(label = DOWNLOAD, iconName = "folder-download-symbolic")
                                         }
-                                    )
+                                    }
+                                )
+                            }
+                            is DistroList.Distro.WithEditions -> {
+                                ExpanderRow(
+                                    title = distro.name,
+                                    subtitle = distro.tagline
+                                ) {
+                                    distro.editions.forEach { edition ->
+                                        ActionRow(
+                                            title = edition.name,
+                                            subtitle = edition.description,
+                                            suffix = {
+                                                Button(
+                                                    modifier = Modifier.css("suggested-action").alignVertical(Align.CENTER),
+                                                    onClick = {
+                                                        onSelect(
+                                                            Screen.BlueprintScreen.Download(
+                                                                name = distro.name,
+                                                                edition = edition.name
+                                                            )
+                                                        )
+                                                    },
+                                                    enabled = edition.config.available
+                                                ) {
+                                                    ButtonContent(label = DOWNLOAD, iconName = "folder-download-symbolic")
+                                                }
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }

@@ -35,6 +35,7 @@ internal suspend inline fun <reified T> IPCTransport.execute(
     return when (data) {
         is ResponseData.Disks -> data.payload as? T
         is ResponseData.Partitions -> data.payload as? T
+        is ResponseData.DistroInfo -> data.payload as? T
         is ResponseData.Empty -> Unit as? T
     } ?: raise(IPCError.SerializationError("Failed to map ResponseData to ${T::class.simpleName}"))
 }
