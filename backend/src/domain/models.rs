@@ -51,3 +51,10 @@ pub struct PublicConfig {
     pub version: String,
     pub secure_boot: bool
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum WorkflowState {
+    Running,
+    Paused,
+    Cancelled
+}

@@ -4,6 +4,7 @@ use crate::domain::errors::DiskError;
 
 pub mod shrink_install_local;
 pub mod uninstall;
+pub mod shrink_install_remote;
 
 #[async_trait]
 pub trait ExecutableWorkflow: Send + Sync {

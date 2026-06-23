@@ -6,11 +6,12 @@ use async_trait::async_trait;
 use tokio::fs::{create_dir_all, remove_file};
 use tokio::process::Command;
 use tokio::runtime::Runtime;
+use tokio::sync::watch;
 use crate::application::spawn_blocking_with_context;
 use crate::application::state::{WorkflowGuard, WorkflowType};
 use crate::application::workflow::ExecutableWorkflow;
 use crate::domain::errors::DiskError;
-use crate::domain::models::Partition;
+use crate::domain::models::{Partition, WorkflowState};
 use crate::domain::traits::DiskManager;
 use crate::infrastructure::{CommandExt, NativeDiskManager};
 use crate::infrastructure::windows::autoplay::AutoPlayGuard;
@@ -27,7 +28,8 @@ pub struct ShrinkInstallWorkflow {
     pub disk_manager: Arc<dyn DiskManager>,
     pub disk_id: String,
     pub partition_id: String,
-    pub iso_path: String
+    pub iso_path: String,
+    pub state_rx: watch::Receiver<WorkflowState>
 }
 
 #[async_trait]
@@ -189,63 +191,71 @@ impl ShrinkInstallWorkflow {
         let is_uefi = NativeDiskManager::is_uefi_host();
         let disk_num = self.disk_id.parse::<u32>().map_err(|_| DiskError::DataValidation("Invalid Disk ID parameter".into()))?;
 
-        telemetry!(IPCEvent::StepShrinkingPartition { partition_id: self.partition_id.clone() });
-        self.disk_manager.shrink_partition(&self.disk_id, &self.partition_id, target_size_bytes).await?;
-        saga.push(Compensation::ExtendSystemPartition { disk_id: self.disk_id.clone(), partition_id: self.partition_id.clone() });
+        let destructive_phase = async {
+            telemetry!(IPCEvent::StepShrinkingPartition { partition_id: self.partition_id.clone() });
+            self.disk_manager.shrink_partition(&self.disk_id, &self.partition_id, target_size_bytes).await?;
+            saga.push(Compensation::ExtendSystemPartition { disk_id: self.disk_id.clone(), partition_id: self.partition_id.clone() });
 
-        telemetry!(IPCEvent::StepCreatingBootPartitions);
-        let payload_size_mb = if is_uefi { boot_size_mb.saturating_sub(50) } else { boot_size_mb };
-        let (payload_letter, boot_letter_opt) = match native_manager.create_live_boot_partitions(disk_num, payload_size_mb, is_uefi).await {
-            Ok(letters) => letters,
-            Err(e) => {
-                saga.abort(native_manager).await;
-                return Err(e);
+            telemetry!(IPCEvent::StepCreatingBootPartitions);
+            let payload_size_mb = if is_uefi { boot_size_mb.saturating_sub(50) } else { boot_size_mb };
+            let (payload_letter, boot_letter_opt) = native_manager.create_live_boot_partitions(disk_num, payload_size_mb, is_uefi).await?;
+            saga.push(Compensation::DeletePartitions { disk_id: disk_num, is_uefi });
+
+            telemetry!(IPCEvent::StepCopyingPayload);
+            let is_hdd = native_manager.is_mechanical_drive(disk_num).await.unwrap_or(false);
+            PayloadManager::copy_payload(
+                iso_drive_letter,
+                &payload_letter,
+                is_hdd,
+                Some(|copied_bytes, total_bytes| {
+                    let percent = ((copied_bytes as f64 / total_bytes as f64) * 100.0) as u8;
+                    telemetry!(IPCEvent::ProgressCopyingPayload {
+                        copied_bytes,
+                        total_bytes,
+                        percent
+                    });
+                })
+            ).await?;
+
+            telemetry!(IPCEvent::StepConfiguringBootloader);
+            let boot_strategy = BootManager::get_strategy(is_uefi);
+            let target_bcd_drive = if is_uefi {
+                boot_letter_opt.as_deref().ok_or_else(|| {
+                    DiskError::DataValidation("Missing FAT32 EFI partition letter".into())
+                })?
+            } else {
+                target_part.drive_letter.as_deref().unwrap_or("C:")
+            };
+
+            boot_strategy.inject_boot_binaries(target_bcd_drive, boot_letter_opt.as_deref()).await?;
+            boot_strategy.patch_windows_bcd("Project Isekai", target_bcd_drive).await?;
+            boot_strategy.write_boot_config(&payload_letter).await?;
+
+            Ok::<_, DiskError>(())
+        };
+
+        tokio::select! {
+            res = destructive_phase => {
+                if let Err(e) = res {
+                    saga.abort(&native_manager).await;
+                    return Err(e);
+                }
             }
-        };
-        saga.push(Compensation::DeletePartitions { disk_id: disk_num, is_uefi });
-
-        telemetry!(IPCEvent::StepCopyingPayload);
-        let is_hdd = native_manager.is_mechanical_drive(disk_num).await.unwrap_or(false);
-        let copy_result = PayloadManager::copy_payload(
-            iso_drive_letter,
-            &payload_letter,
-            is_hdd,
-            Some(|copied_bytes, total_bytes| {
-                let percent = ((copied_bytes as f64 / total_bytes as f64) * 100.0) as u8;
-                telemetry!(IPCEvent::ProgressCopyingPayload {
-                    copied_bytes,
-                    total_bytes,
-                    percent
-                });
-            })
-        ).await;
-
-        if let Err(e) = copy_result {
-            saga.abort(native_manager).await;
-            return Err(e);
-        }
-
-        telemetry!(IPCEvent::StepConfiguringBootloader);
-        let boot_strategy = BootManager::get_strategy(is_uefi);
-        let target_bcd_drive = if is_uefi {
-            boot_letter_opt.as_deref().ok_or_else(|| {
-                DiskError::DataValidation("Missing FAT32 EFI partition letter".into())
-            })?
-        } else {
-            target_part.drive_letter.as_deref().unwrap_or("C:")
-        };
-
-        if let Err(e) = boot_strategy.inject_boot_binaries(target_bcd_drive, boot_letter_opt.as_deref()).await {
-            saga.abort(native_manager).await; return Err(e);
-        }
-        if let Err(e) = boot_strategy.patch_windows_bcd("Project Isekai", target_bcd_drive).await {
-            saga.abort(native_manager).await; return Err(e);
-        }
-        if let Err(e) = boot_strategy.write_boot_config(&payload_letter).await {
-            saga.abort(native_manager).await; return Err(e);
+            _ = Self::wait_for_cancel(self.state_rx.clone()) => {
+                saga.abort(native_manager).await;
+                return Err(DiskError::DataValidation("Installation was cancelled by the user.".into()))
+            }
         }
 
         Ok(())
+    }
+
+    async fn wait_for_cancel(mut rx: watch::Receiver<WorkflowState>) {
+        let current = rx.borrow().clone();
+        if current == WorkflowState::Cancelled { return; }
+        while rx.changed().await.is_ok() {
+            if *rx.borrow() == WorkflowState::Cancelled { return; }
+        }
     }
 }
 

@@ -19,6 +19,16 @@ pub enum IPCRequest {
         partition_id: String,
         iso_path: String
     },
+    ShrinkInstallRemote {
+        id: String,
+        disk_id: String,
+        partition_id: String,
+        distro_id: String
+    },
+
+    PauseWorkflow { id: String },
+    CancelWorkflow { id: String },
+
     Uninstall { id: String, disk_id: String }
 }
 
@@ -85,7 +95,14 @@ define_telemetry! {
         ProgressCopyingPayload { copied_bytes: u64, total_bytes: u64, percent: u8 },
 
         #[telemetry(info, "Hardware changes detected. Refreshing system state...")]
-        SystemHardwareChanged
+        SystemHardwareChanged,
+
+        #[telemetry(step, "Initializing download connection...")]
+        StepInitializingDownload,
+
+        #[telemetry(progress, "Downloading: {percent}%")]
+        ProgressDownload { downloaded_bytes: u64, total_bytes: u64, percent: u8 }
+
     }
 }
 
