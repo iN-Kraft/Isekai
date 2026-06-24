@@ -62,6 +62,30 @@
     "checksum": "f24b83bc1bf4f90618fb56e817fe3c1e67328e68720a8350131080db38bf9437",
     "secure_boot": true
   },
+  "nobara-classic": {
+    "version": "43",
+    "mirrors": [
+      "https://nobara-images.nobaraproject.org/Nobara-43-Official-NV-2026-04-24.iso"
+    ],
+    "checksum": "d65c705c847c2d41906e71c755b9397dca29523a3da7bbdef2e54bb6cfa9f41d",
+    "secure_boot": false
+  },
+  "nobara-gnome": {
+    "version": "43",
+    "mirrors": [
+      "https://nobara-images.nobaraproject.org/Nobara-43-GNOME-NV-2026-04-25.iso"
+    ],
+    "checksum": "e8bc051bb85194416cac4a096c9dc494edb47f42bf990549303ab2955fffef45",
+    "secure_boot": false
+  },
+  "nobara-kde": {
+    "version": "43",
+    "mirrors": [
+      "https://nobara-images.nobaraproject.org/Nobara-43-KDE-NV-2026-04-25.iso"
+    ],
+    "checksum": "ea3fa3e8d889a7370a83cc3db56db7db8acb2f510faca8cb18a63aa5afb62a44",
+    "secure_boot": false
+  },
   "cachyos": {
     "version": "2026-04-26",
     "mirrors": [

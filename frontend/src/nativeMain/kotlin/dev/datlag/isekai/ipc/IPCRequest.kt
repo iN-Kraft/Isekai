@@ -62,4 +62,16 @@ sealed interface IPCRequest {
         override val id: String,
         @SerialName("disk_id") val diskId: String
     ) : IPCRequest
+
+    @Serializable
+    @SerialName("PauseWorkflow")
+    data class PauseWorkflow(
+        override val id: String
+    ) : IPCRequest
+    @Serializable
+
+    @SerialName("CancelWorkflow")
+    data class CancelWorkflow(
+        override val id: String
+    ) : IPCRequest
 }
