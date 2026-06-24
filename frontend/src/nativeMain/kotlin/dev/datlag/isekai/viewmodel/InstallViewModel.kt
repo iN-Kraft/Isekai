@@ -26,7 +26,24 @@ class InstallViewModel(
                     println(err)
                 },
                 transform = {
-                    println("Install Finished!")
+                    println("Install Started!")
+                }
+            )
+        }
+    }
+
+    fun shrinkInstallRemote(diskId: String, partitionId: String, distroId: String) {
+        viewModelScope.launch {
+            fold(
+                block = { repository.shrinkInstallRemote(diskId, partitionId, distroId) },
+                catch = { e ->
+                    e.printStackTrace()
+                },
+                recover = { err: IPCError ->
+                    println(err)
+                },
+                transform = {
+                    println("Download and Install Started!")
                 }
             )
         }

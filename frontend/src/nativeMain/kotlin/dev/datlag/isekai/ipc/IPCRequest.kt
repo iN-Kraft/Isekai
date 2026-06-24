@@ -48,6 +48,15 @@ sealed interface IPCRequest {
     ) : IPCRequest
 
     @Serializable
+    @SerialName("ShrinkInstallRemote")
+    data class ShrinkInstallRemote(
+        override val id: String,
+        @SerialName("disk_id") val diskId: String,
+        @SerialName("partition_id") val partitionId: String,
+        @SerialName("distro_id") val distroId: String
+    ) : IPCRequest
+
+    @Serializable
     @SerialName("Uninstall")
     data class Uninstall(
         override val id: String,

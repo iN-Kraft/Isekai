@@ -190,7 +190,13 @@ impl NetworkManager {
                     }
                 }
 
-                let chunk = chunk_res.map_err(|e| DiskError::DataValidation(format!("Stream error: {}", e)))?;
+                let chunk = match chunk_res {
+                    Ok(c) => c,
+                    Err(e) => {
+                        warn!("Network stream interrupted: {}. Auto-resuming download...", e);
+                        break 'chunk_loop;
+                    }
+                };
 
                 file.write_all(&chunk).await.map_err(|e| DiskError::DataValidation(format!("Write error: {}", e)))?;
                 hasher.update(&chunk);

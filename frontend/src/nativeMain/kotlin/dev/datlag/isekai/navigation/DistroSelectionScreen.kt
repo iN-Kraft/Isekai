@@ -134,6 +134,7 @@ private fun DistroListView(
                                             onClick = {
                                                 onSelect(
                                                     Screen.BlueprintScreen.Download(
+                                                        id = distro.id,
                                                         name = distro.name,
                                                         edition = null
                                                     )
@@ -161,6 +162,7 @@ private fun DistroListView(
                                                     onClick = {
                                                         onSelect(
                                                             Screen.BlueprintScreen.Download(
+                                                                id = edition.id,
                                                                 name = distro.name,
                                                                 edition = edition.name
                                                             )

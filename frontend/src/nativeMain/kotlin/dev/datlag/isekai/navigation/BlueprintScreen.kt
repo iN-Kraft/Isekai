@@ -255,7 +255,16 @@ fun BlueprintScreen(
                                             filePath = config.filePath
                                         ))
                                     }
-                                    else -> { }
+                                    is Screen.BlueprintScreen.Download -> {
+                                        val diskId = state.diskState.selectedDisk?.stableId ?: state.diskState.disks.getOrNull(selectedDiskIndex)?.stableId ?: return@AlertDialog
+                                        val partitionId = state.partitionState.selectedPartition?.id ?: state.partitionState.partitions.getOrNull(selectedPartitionIndex)?.id ?: return@AlertDialog
+
+                                        onInstall(Screen.Install.Shrink.Remote(
+                                            diskId = diskId,
+                                            partitionId = partitionId,
+                                            distroId = config.id
+                                        ))
+                                    }
                                 }
                             }
                         }

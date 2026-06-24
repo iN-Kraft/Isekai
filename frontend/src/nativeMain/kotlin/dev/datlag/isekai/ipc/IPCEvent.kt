@@ -76,4 +76,18 @@ sealed interface IPCEvent {
     @Serializable
     @SerialName("SystemHardwareChanged")
     data object SystemHardwareChanged : IPCEvent
+
+    // --- NEW DOWNLOAD EVENTS --- //
+
+    @Serializable
+    @SerialName("StepInitializingDownload")
+    data object StepInitializingDownload : IPCEvent
+
+    @Serializable
+    @SerialName("ProgressDownload")
+    data class ProgressDownload(
+        @SerialName("downloaded_bytes") val downloadedBytes: ULong,
+        @SerialName("total_bytes") val totalBytes: ULong,
+        @SerialName("percent") val percent: UByte
+    ) : IPCEvent
 }

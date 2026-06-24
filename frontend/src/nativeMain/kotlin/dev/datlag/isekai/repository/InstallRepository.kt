@@ -16,6 +16,13 @@ class InstallRepository(private val transport: IPCTransport) {
     ): Unit = transport.execute { IPCRequest.ShrinkInstallLocal(it, diskId, partitionId, isoPath) }
 
     context(_: Raise<IPCError>)
+    suspend fun shrinkInstallRemote(
+        diskId: String,
+        partitionId: String,
+        distroId: String
+    ): Unit = transport.execute { IPCRequest.ShrinkInstallRemote(it, diskId, partitionId, distroId) }
+
+    context(_: Raise<IPCError>)
     suspend fun uninstall(
         diskId: String
     ): Unit = transport.execute { IPCRequest.Uninstall(it, diskId) }

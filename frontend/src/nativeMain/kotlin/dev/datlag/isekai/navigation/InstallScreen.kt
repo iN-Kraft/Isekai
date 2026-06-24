@@ -29,6 +29,13 @@ fun InstallScreen(
                     isoPath = config.filePath
                 )
             }
+            is Screen.Install.Shrink.Remote -> {
+                installViewModel.shrinkInstallRemote(
+                    diskId = config.diskId,
+                    partitionId = config.partitionId,
+                    distroId = config.distroId
+                )
+            }
         }
     }
 

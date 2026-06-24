@@ -26,18 +26,10 @@ sealed interface Screen : NavKey {
 
         @Serializable
         data class Download(
+            val id: String,
             val name: String,
             val edition: String?
-        ) : BlueprintScreen {
-            @Transient
-            val id: String = buildString {
-                append(name.lowercase().replace("\\s+".toRegex(), "-"))
-                if (!edition.isNullOrBlank()) {
-                    append("-")
-                    append(edition.lowercase().replace("\\s+".toRegex(), "-"))
-                }
-            }
-        }
+        ) : BlueprintScreen
     }
 
     @Serializable
@@ -51,6 +43,13 @@ sealed interface Screen : NavKey {
                 val diskId: String,
                 val partitionId: String,
                 val filePath: String,
+            ) : Shrink
+
+            @Serializable
+            data class Remote(
+                val diskId: String,
+                val partitionId: String,
+                val distroId: String
             ) : Shrink
         }
     }
