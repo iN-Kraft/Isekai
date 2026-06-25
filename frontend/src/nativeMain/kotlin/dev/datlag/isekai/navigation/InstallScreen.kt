@@ -14,6 +14,7 @@ import dev.datlag.isekai.viewmodel.InstallViewModel
 import dev.datlag.isekai.viewmodel.kodeinViewModel
 import dev.datlag.kommons.adwaita.SpinnerPaintable
 import dev.datlag.kommons.adwaita.compose.component.ButtonContent
+import dev.datlag.kommons.adwaita.compose.component.Clamp
 import dev.datlag.kommons.adwaita.compose.component.Scaffold
 import dev.datlag.kommons.adwaita.compose.component.StatusPage
 import dev.datlag.kommons.adwaita.compose.component.StatusPageNode
@@ -21,6 +22,7 @@ import dev.datlag.kommons.adwaita.compose.component.TopAppBar
 import dev.datlag.kommons.adwaita.compose.component.WindowTitle
 import dev.datlag.kommons.gtk.compose.GtkApplier
 import dev.datlag.kommons.gtk.compose.component.Button
+import dev.datlag.kommons.gtk.compose.component.Column
 import dev.datlag.kommons.gtk.compose.component.IconName
 import dev.datlag.kommons.gtk.compose.component.LinearProgressIndicator
 import dev.datlag.kommons.gtk.compose.component.Text
@@ -90,11 +92,13 @@ fun InstallScreen(
                     title = state.title,
                     icon = IconName("selection-mode-symbolic")
                 ) {
-                    Button(
-                        modifier = Modifier.css("pill", "suggested-action"),
-                        onClick = { exit(0) },
-                    ) {
-                        ButtonContent(label = "Exit", iconName = "application-exit-symbolic")
+                    Clamp {
+                        Button(
+                            modifier = Modifier.css("pill", "suggested-action"),
+                            onClick = { exit(0) },
+                        ) {
+                            ButtonContent(label = "Exit", iconName = "application-exit-symbolic")
+                        }
                     }
                 }
             }
@@ -104,11 +108,13 @@ fun InstallScreen(
                     title = state.title,
                     icon = IconName("media-playback-pause-symbolic")
                 ) {
-                    Button(
-                        modifier = Modifier.css("pill", "suggested-action"),
-                        onClick = { installViewModel.togglePause() }
-                    ) {
-                        ButtonContent(label = "Resume", iconName = "media-playback-start-symbolic")
+                    Clamp {
+                        Button(
+                            modifier = Modifier.css("pill", "suggested-action"),
+                            onClick = { installViewModel.togglePause() }
+                        ) {
+                            ButtonContent(label = "Resume", iconName = "media-playback-start-symbolic")
+                        }
                     }
                 }
             }
@@ -117,18 +123,22 @@ fun InstallScreen(
                     modifier = Modifier.fillMaxSize(),
                     title = state.title
                 ) {
-                    if (state.progress != null) {
-                        val animatedProgress = animateFractionAsState(state.progress)
+                    Clamp {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            if (state.progress != null) {
+                                val animatedProgress = animateFractionAsState(state.progress)
 
-                        LinearProgressIndicator(progress = animatedProgress ?: 0F)
-                    }
+                                LinearProgressIndicator(progress = animatedProgress ?: 0F)
+                            }
 
-                    if (state.isDownloading) {
-                        Button(
-                            modifier = Modifier.css("pill"),
-                            onClick = { installViewModel.togglePause() }
-                        ) {
-                            ButtonContent(label = "Pause", iconName = "media-playback-pause-symbolic")
+                            if (state.isDownloading) {
+                                Button(
+                                    modifier = Modifier.css("pill"),
+                                    onClick = { installViewModel.togglePause() }
+                                ) {
+                                    ButtonContent(label = "Pause", iconName = "media-playback-pause-symbolic")
+                                }
+                            }
                         }
                     }
                 }

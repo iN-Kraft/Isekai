@@ -109,7 +109,7 @@ impl WindowsDiskManager {
             format!(
                 "select disk {}\n\
                 create partition primary size={}\n\
-                format fs=fat32 quick label=\"{}\"\n\
+                format fs=exfat quick label=\"{}\"\n\
                 assign\n\
                 create partition primary size={}\n\
                 format fs=fat32 quick label=\"{}\"\n\
@@ -122,7 +122,7 @@ impl WindowsDiskManager {
             format!(
                 "select disk {}\n\
                 create partition primary size={}\n\
-                format fs=fat32 quick label=\"{}\"\n\
+                format fs=exfat quick label=\"{}\"\n\
                 assign\n\
                 exit\n",
                 disk_id, iso_payload_size_mb, PARTITION_LABEL_LIVE

@@ -104,27 +104,23 @@ pub async fn process_request(
                 let (state_tx, state_rx) = watch::channel(WorkflowState::Running);
                 *active_lock = Some(state_tx);
 
-                let ctx = APP_CONTEXT.with(|ctx| ctx.clone());
-                spawn(async move {
-                    APP_CONTEXT.scope(ctx, async move {
-                        let workflow = ShrinkInstallWorkflow {
-                            disk_manager,
-                            disk_id,
-                            partition_id,
-                            iso_path,
-                            state_rx
-                        };
+                let workflow = ShrinkInstallWorkflow {
+                    disk_manager,
+                    disk_id,
+                    partition_id,
+                    iso_path,
+                    state_rx
+                };
 
-                        match WorkflowRunner::run(workflow).await {
-                            Ok(_) => info!("Installation completed successfully."),
-                            Err(e) => error!("Installation failed or was cancelled: {:?}", e)
-                        }
+                let result = match WorkflowRunner::run(workflow).await {
+                    Ok(_) => {
+                        IPCResponse { id, success: true, data: Some(ResponseData::Empty), error: None }
+                    }
+                    Err(e) => build_error(&id, e.to_string())
+                };
 
-                        *get_active_workflow().lock().await = None;
-                    }).await;
-                });
-
-                IPCResponse { id, success: true, data: Some(ResponseData::Empty), error: None }
+                *get_active_workflow().lock().await = None;
+                result
             }
         }
 
@@ -136,34 +132,28 @@ pub async fn process_request(
                 let (state_tx, state_rx) = watch::channel(WorkflowState::Running);
                 *active_lock = Some(state_tx);
 
-                let disk_manager_clone = disk_manager.clone();
-                let ctx = APP_CONTEXT.with(|ctx| ctx.clone());
+                let workflow = ShrinkInstallRemoteWorkflow {
+                    disk_manager,
+                    disk_id,
+                    partition_id,
+                    distro_id,
+                    state_rx
+                };
 
-                spawn(async move {
-                    APP_CONTEXT.scope(ctx, async move {
-                        let workflow = ShrinkInstallRemoteWorkflow {
-                            disk_manager,
-                            disk_id,
-                            partition_id,
-                            distro_id,
-                            state_rx
-                        };
-
-                        match WorkflowRunner::run(workflow).await {
-                            Ok(_) => info!("Remote Installation completed successfully."),
-                            Err(e) => error!("Remote Installation failed or was cancelled: {:?}", e)
+                let result = match WorkflowRunner::run(workflow).await {
+                    Ok(_) => {
+                        IPCResponse {
+                            id,
+                            success: true,
+                            data: Some(ResponseData::Empty),
+                            error: None
                         }
-                        
-                        *get_active_workflow().lock().await = None;
-                    }).await;
-                });
+                    },
+                    Err(e) => build_error(&id, e.to_string())
+                };
 
-                IPCResponse {
-                    id,
-                    success: true,
-                    data: Some(ResponseData::Empty),
-                    error: None
-                }
+                *get_active_workflow().lock().await = None;
+                result
             }
         }
 

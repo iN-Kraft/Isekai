@@ -17,6 +17,13 @@ data class DistroList(
     )
 
     @Serializable
+    data class Variant(
+        val name: String,
+        val id: String,
+        val config: PublicConfig = PublicConfig()
+    )
+
+    @Serializable
     sealed interface Distro {
         val name: String
         val tagline: String
@@ -26,7 +33,8 @@ data class DistroList(
             override val name: String,
             override val tagline: String,
             val id: String,
-            val config: PublicConfig = PublicConfig()
+            val config: PublicConfig = PublicConfig(),
+            val variants: List<Variant> = emptyList()
         ) : Distro
 
         @Serializable
@@ -41,7 +49,8 @@ data class DistroList(
                 val name: String,
                 val description: String,
                 val id: String,
-                val config: PublicConfig = PublicConfig()
+                val config: PublicConfig = PublicConfig(),
+                val variants: List<Variant> = emptyList()
             )
         }
     }
@@ -143,17 +152,47 @@ data class DistroList(
                                 Distro.WithEditions.Edition(
                                     name = "Official",
                                     description = "The main Nobara experience.",
-                                    id = "nobara-official"
+                                    id = "nobara-official",
+                                    variants = listOf(
+                                        Variant(
+                                            name = "Standard",
+                                            id = "nobara-official-standard",
+                                        ),
+                                        Variant(
+                                            name = "NVIDIA",
+                                            id = "nobara-official-nvidia",
+                                        )
+                                    )
                                 ),
                                 Distro.WithEditions.Edition(
                                     name = "GNOME",
                                     description = "Clean GNOME layout with a focus on content.",
-                                    id = "nobara-gnome"
+                                    id = "nobara-gnome",
+                                    variants = listOf(
+                                        Variant(
+                                            name = "Standard",
+                                            id = "nobara-gnome-standard",
+                                        ),
+                                        Variant(
+                                            name = "NVIDIA",
+                                            id = "nobara-gnome-nvidia",
+                                        )
+                                    )
                                 ),
                                 Distro.WithEditions.Edition(
                                     name = "KDE",
                                     description = "Classic KDE experience with deep customization for power users.",
-                                    id = "nobara-kde"
+                                    id = "nobara-kde",
+                                    variants = listOf(
+                                        Variant(
+                                            name = "Standard",
+                                            id = "nobara-kde-standard",
+                                        ),
+                                        Variant(
+                                            name = "NVIDIA",
+                                            id = "nobara-kde-nvidia",
+                                        )
+                                    )
                                 )
                             )
                         )

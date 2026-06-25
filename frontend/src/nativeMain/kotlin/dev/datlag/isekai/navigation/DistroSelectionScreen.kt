@@ -19,6 +19,7 @@ import dev.datlag.kommons.adwaita.compose.component.Clamp
 import dev.datlag.kommons.adwaita.compose.component.ExpanderRow
 import dev.datlag.kommons.adwaita.compose.component.PreferencesGroup
 import dev.datlag.kommons.adwaita.compose.component.PreferencesPage
+import dev.datlag.kommons.adwaita.compose.component.SplitButton
 import dev.datlag.kommons.adwaita.compose.component.ViewStack
 import dev.datlag.kommons.adwaita.compose.component.ViewStackPage
 import dev.datlag.kommons.adwaita.compose.component.ViewSwitcher
@@ -129,21 +130,14 @@ private fun DistroListView(
                                     title = distro.name,
                                     subtitle = distro.tagline,
                                     suffix = {
-                                        Button(
-                                            modifier = Modifier.css("suggested-action").alignVertical(Align.CENTER),
-                                            onClick = {
-                                                onSelect(
-                                                    Screen.BlueprintScreen.Download(
-                                                        id = distro.id,
-                                                        name = distro.name,
-                                                        edition = null
-                                                    )
-                                                )
-                                            },
-                                            enabled = distro.config.available
-                                        ) {
-                                            ButtonContent(label = DOWNLOAD, iconName = "folder-download-symbolic")
-                                        }
+                                        VariantDownloadButton(
+                                            baseId = distro.id,
+                                            baseConfig = distro.config,
+                                            variants = distro.variants,
+                                            distroName = distro.name,
+                                            editionName = null,
+                                            onSelect = onSelect
+                                        )
                                     }
                                 )
                             }
@@ -157,21 +151,14 @@ private fun DistroListView(
                                             title = edition.name,
                                             subtitle = edition.description,
                                             suffix = {
-                                                Button(
-                                                    modifier = Modifier.css("suggested-action").alignVertical(Align.CENTER),
-                                                    onClick = {
-                                                        onSelect(
-                                                            Screen.BlueprintScreen.Download(
-                                                                id = edition.id,
-                                                                name = distro.name,
-                                                                edition = edition.name
-                                                            )
-                                                        )
-                                                    },
-                                                    enabled = edition.config.available
-                                                ) {
-                                                    ButtonContent(label = DOWNLOAD, iconName = "folder-download-symbolic")
-                                                }
+                                                VariantDownloadButton(
+                                                    baseId = edition.id,
+                                                    baseConfig = edition.config,
+                                                    variants = edition.variants,
+                                                    distroName = distro.name,
+                                                    editionName = edition.name,
+                                                    onSelect = onSelect
+                                                )
                                             }
                                         )
                                     }
@@ -216,6 +203,46 @@ private fun DistroListView(
                     }
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun VariantDownloadButton(
+    baseId: String,
+    baseConfig: DistroList.PublicConfig,
+    variants: List<DistroList.Variant>,
+    distroName: String,
+    editionName: String?,
+    onSelect: (Screen.BlueprintScreen.Download) -> Unit
+) = with(DistroSelection) {
+    if (variants.isEmpty()) {
+        Button(
+            modifier = Modifier.css("suggested-action").alignVertical(Align.CENTER),
+            onClick = {
+                onSelect(Screen.BlueprintScreen.Download(baseId, distroName, editionName))
+            },
+            enabled = baseConfig.available
+        ) {
+            ButtonContent(label = DOWNLOAD, iconName = "folder-download-symbolic")
+        }
+    } else {
+        var selectedVariant by remember(variants) {
+            mutableStateOf(variants.firstOrNull { it.config.available } ?: variants.firstOrNull())
+        }
+
+        SplitButton(
+            modifier = Modifier.css("suggested-action").alignVertical(Align.CENTER),
+            onClicked = {
+                onSelect(Screen.BlueprintScreen.Download(selectedVariant?.id ?: baseId, distroName, editionName))
+            },
+            menu = {
+                variants.forEach { variant ->
+                    item(label = variant.name, onClick = { selectedVariant = variant })
+                }
+            }
+        ) {
+            ButtonContent(label = selectedVariant?.name ?: DOWNLOAD, iconName = "folder-download-symbolic")
         }
     }
 }

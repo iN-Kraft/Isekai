@@ -62,7 +62,15 @@
     "checksum": "f24b83bc1bf4f90618fb56e817fe3c1e67328e68720a8350131080db38bf9437",
     "secure_boot": true
   },
-  "nobara-classic": {
+  "nobara-official-standard": {
+    "version": "43",
+    "mirrors": [
+      "https://nobara-images.nobaraproject.org/Nobara-43-Official-2026-04-19.iso"
+    ],
+    "checksum": "806fc42e5247f828ad07571507564f476f375e4dcc75c7d69c7cead816b24f25",
+    "secure_boot": false
+  },
+  "nobara-official-nvidia": {
     "version": "43",
     "mirrors": [
       "https://nobara-images.nobaraproject.org/Nobara-43-Official-NV-2026-04-24.iso"
@@ -70,7 +78,15 @@
     "checksum": "d65c705c847c2d41906e71c755b9397dca29523a3da7bbdef2e54bb6cfa9f41d",
     "secure_boot": false
   },
-  "nobara-gnome": {
+  "nobara-gnome-standard": {
+    "version": "43",
+    "mirrors": [
+      "https://nobara-images.nobaraproject.org/Nobara-43-GNOME-2026-04-19.iso"
+    ],
+    "checksum": "c52a5ad11082973bb67efa8d7b18b6b50f7cee71580b2a9ce28f36dff8f2c543",
+    "secure_boot": false
+  },
+  "nobara-gnome-nvidia": {
     "version": "43",
     "mirrors": [
       "https://nobara-images.nobaraproject.org/Nobara-43-GNOME-NV-2026-04-25.iso"
@@ -78,7 +94,15 @@
     "checksum": "e8bc051bb85194416cac4a096c9dc494edb47f42bf990549303ab2955fffef45",
     "secure_boot": false
   },
-  "nobara-kde": {
+  "nobara-kde-standard": {
+    "version": "43",
+    "mirrors": [
+      "https://nobara-images.nobaraproject.org/Nobara-43-KDE-2026-04-19.iso"
+    ],
+    "checksum": "b99cc71238b77d31f195b210752421fd5a01be72ab35c3a3e1c3c9f82a994fc0",
+    "secure_boot": false
+  },
+  "nobara-kde-nvidia": {
     "version": "43",
     "mirrors": [
       "https://nobara-images.nobaraproject.org/Nobara-43-KDE-NV-2026-04-25.iso"
