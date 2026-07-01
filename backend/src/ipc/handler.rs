@@ -2,7 +2,7 @@ use std::sync::{Arc, OnceLock};
 use tokio::spawn;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{watch, Mutex};
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 use crate::application::APP_CONTEXT;
 use crate::domain::traits::DiskManager;
 use crate::infrastructure::windows::bitlocker::BitLocker;
@@ -103,6 +103,7 @@ pub async fn process_request(
             } else {
                 let (state_tx, state_rx) = watch::channel(WorkflowState::Running);
                 *active_lock = Some(state_tx);
+                drop(active_lock);
 
                 let workflow = ShrinkInstallWorkflow {
                     disk_manager,
@@ -131,6 +132,7 @@ pub async fn process_request(
             } else {
                 let (state_tx, state_rx) = watch::channel(WorkflowState::Running);
                 *active_lock = Some(state_tx);
+                drop(active_lock);
 
                 let workflow = ShrinkInstallRemoteWorkflow {
                     disk_manager,
@@ -158,6 +160,7 @@ pub async fn process_request(
         }
 
         IPCRequest::PauseWorkflow { id } => {
+            info!("Received Pause/Resume command!");
             if let Some(state_tx) = get_active_workflow().lock().await.as_ref() {
                 let current_state = state_tx.borrow().clone();
                 let new_state = if current_state == WorkflowState::Paused {
@@ -165,12 +168,18 @@ pub async fn process_request(
                 } else {
                     WorkflowState::Paused
                 };
+
+                info!("Toggling workflow state from {:?} to {:?}", current_state, new_state);
                 let _ = state_tx.send(new_state);
+            } else {
+                warn!("Requested pause, but no active workflow was found!");
             }
             IPCResponse { id, success: true, data: Some(ResponseData::Empty), error: None }
         }
 
         IPCRequest::CancelWorkflow { id } => {
+            info!("Received Cancel command!");
+
             if let Some(state_tx) = get_active_workflow().lock().await.as_ref() {
                 let _ = state_tx.send(WorkflowState::Cancelled);
             }

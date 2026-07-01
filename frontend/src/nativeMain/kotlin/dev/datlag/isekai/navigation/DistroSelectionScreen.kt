@@ -240,7 +240,8 @@ private fun VariantDownloadButton(
                 variants.forEach { variant ->
                     item(label = variant.name, onClick = { selectedVariant = variant })
                 }
-            }
+            },
+            enabled = selectedVariant?.config?.available == true
         ) {
             ButtonContent(label = selectedVariant?.name ?: DOWNLOAD, iconName = "folder-download-symbolic")
         }

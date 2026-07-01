@@ -88,6 +88,7 @@ sealed interface IPCEvent {
     data class ProgressDownload(
         @SerialName("downloaded_bytes") val downloadedBytes: ULong,
         @SerialName("total_bytes") val totalBytes: ULong,
-        @SerialName("percent") val percent: UByte
+        @SerialName("percent") val percent: UByte,
+        @SerialName("eta_seconds") val etaSeconds: ULong
     ) : IPCEvent
 }

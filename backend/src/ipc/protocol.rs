@@ -100,8 +100,8 @@ define_telemetry! {
         #[telemetry(step, "Initializing download connection...")]
         StepInitializingDownload,
 
-        #[telemetry(progress, "Downloading: {percent}%")]
-        ProgressDownload { downloaded_bytes: u64, total_bytes: u64, percent: u8 }
+        #[telemetry(progress, "Downloading: {percent}% (ETA: {eta_seconds}s)")]
+        ProgressDownload { downloaded_bytes: u64, total_bytes: u64, percent: u8, eta_seconds: u64 }
 
     }
 }

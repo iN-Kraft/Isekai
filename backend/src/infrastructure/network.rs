@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 use tokio::fs::{create_dir_all, metadata, remove_file, File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{watch, OnceCell};
+use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 use crate::domain::errors::DiskError;
 use crate::domain::models::{PublicConfig, RemoteConfig, WorkflowState};
@@ -23,7 +24,7 @@ pub struct NetworkManager;
 impl NetworkManager {
     fn get_client() -> Result<Client, DiskError> {
         Client::builder()
-            .timeout(Duration::from_secs(10))
+            .connect_timeout(Duration::from_secs(10))
             .build()
             .map_err(|e| DiskError::DataValidation(format!("Failed to build HTTP client: {}", e)))
     }
@@ -144,6 +145,7 @@ impl NetworkManager {
                     return Err(DiskError::DataValidation("Download Cancelled.".into()))
                 }
                 WorkflowState::Paused => {
+                    info!("Download paused. Waiting for resume signal...");
                     let _ = state_rx.changed().await;
                     continue;
                 }
@@ -180,7 +182,13 @@ impl NetworkManager {
                 .map_err(|e| DiskError::DataValidation(format!("Failed to open file for writing: {}", e)))?;
 
             let mut stream = response.bytes_stream();
-            let mut last_percent = 0;
+            let mut last_percent = if total_size > 0 {
+                ((downloaded_bytes as f64 / total_size as f64) * 100.0) as u8
+            } else {
+                0
+            };
+            let stream_start_time = Instant::now();
+            let stream_start_bytes = downloaded_bytes;
 
             'chunk_loop: while let Some(chunk_res) = stream.next().await {
                 if state_rx.has_changed().unwrap_or(false) {
@@ -205,10 +213,21 @@ impl NetworkManager {
                 if total_size > 0 {
                     let percent = ((downloaded_bytes as f64 / total_size as f64) * 100.0) as u8;
                     if percent > last_percent {
+                        let elapsed = stream_start_time.elapsed().as_secs_f64();
+                        let mut eta_seconds = 0u64;
+
+                        if elapsed > 0.0 {
+                            let speed = (downloaded_bytes - stream_start_bytes) as f64 / elapsed;
+                            if speed > 0.0 {
+                                eta_seconds = ((total_size - downloaded_bytes) as f64 / speed) as u64;
+                            }
+                        }
+
                         telemetry!(IPCEvent::ProgressDownload {
                             downloaded_bytes,
                             total_bytes: total_size,
-                            percent
+                            percent,
+                            eta_seconds
                         });
                         last_percent = percent;
                     }
