@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ComposeNode
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -20,16 +21,20 @@ import dev.datlag.kommons.adwaita.compose.component.StatusPage
 import dev.datlag.kommons.adwaita.compose.component.StatusPageNode
 import dev.datlag.kommons.adwaita.compose.component.TopAppBar
 import dev.datlag.kommons.adwaita.compose.component.WindowTitle
+import dev.datlag.kommons.gtk.Justification
 import dev.datlag.kommons.gtk.compose.GtkApplier
 import dev.datlag.kommons.gtk.compose.component.Button
 import dev.datlag.kommons.gtk.compose.component.Column
+import dev.datlag.kommons.gtk.compose.component.HorizontalDivider
 import dev.datlag.kommons.gtk.compose.component.IconName
 import dev.datlag.kommons.gtk.compose.component.LinearProgressIndicator
+import dev.datlag.kommons.gtk.compose.component.Row
 import dev.datlag.kommons.gtk.compose.component.Text
 import dev.datlag.kommons.gtk.compose.modifier.Modifier
 import dev.datlag.kommons.gtk.compose.modifier.css
 import dev.datlag.kommons.gtk.compose.modifier.fillMaxSize
 import dev.datlag.kommons.gtk.compose.modifier.fillMaxWidth
+import dev.datlag.kommons.gtk.glib.GLib
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.currentCoroutineContext
@@ -38,6 +43,8 @@ import kotlinx.coroutines.isActive
 import platform.posix.exit
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
+import dev.datlag.isekai.viewmodel.InstallViewModel.State as State
 
 @Composable
 fun InstallScreen(
@@ -73,7 +80,7 @@ fun InstallScreen(
                 navigationIcon = {
                     Button(
                         onClick = { installViewModel.cancelWorkflow() },
-                        enabled = state.isRunning
+                        enabled = state is State.Running
                     ) {
                         ButtonContent(
                             label = "Cancel",
@@ -85,11 +92,17 @@ fun InstallScreen(
             )
         }
     ) {
-        when {
-            state.isFinished -> {
+        when (val currentState = state) {
+            is State.Idle -> {
+                LoadingStatusPage(
+                    modifier = Modifier.fillMaxSize(),
+                    title = "Preparing..."
+                )
+            }
+            is State.Success -> {
                 StatusPage(
                     modifier = Modifier.fillMaxSize(),
-                    title = state.title,
+                    title = "Installation Complete",
                     icon = IconName("selection-mode-symbolic")
                 ) {
                     Clamp {
@@ -102,41 +115,106 @@ fun InstallScreen(
                     }
                 }
             }
-            state.isPaused -> {
+            is State.Error -> {
                 StatusPage(
                     modifier = Modifier.fillMaxSize(),
-                    title = state.title,
-                    icon = IconName("media-playback-pause-symbolic")
-                ) {
-                    Clamp {
-                        Button(
-                            modifier = Modifier.css("pill", "suggested-action"),
-                            onClick = { installViewModel.togglePause() }
-                        ) {
-                            ButtonContent(label = "Resume", iconName = "media-playback-start-symbolic")
+                    title = "Installation Error",
+                    description = currentState.message,
+                    icon = IconName("dialog-error-symbolic")
+                )
+            }
+            is State.Running -> {
+                when (currentState) {
+                    is State.Running.Indeterminate -> {
+                        LoadingStatusPage(
+                            modifier = Modifier.fillMaxSize(),
+                            title = currentState.title
+                        )
+                    }
+                    is State.Running.Downloading -> {
+                        if (currentState.isPaused) {
+                            StatusPage(
+                                modifier = Modifier.fillMaxSize(),
+                                title = currentState.title,
+                                icon = IconName("media-playback-pause-symbolic")
+                            ) {
+                                Clamp {
+                                    Button(
+                                        modifier = Modifier.css("pill", "suggested-action"),
+                                        onClick = { installViewModel.togglePause() }
+                                    ) {
+                                        ButtonContent(label = "Resume", iconName = "media-playback-start-symbolic")
+                                    }
+                                }
+                            }
+                        } else {
+                            val downloadedBytesText by remember(currentState.downloadedBytes) { derivedStateOf {
+                                GLib.formatSizeForDisplay(currentState.downloadedBytes.toLong())
+                            } }
+                            val totalBytesText by remember(currentState.totalBytes) { derivedStateOf {
+                                GLib.formatSizeForDisplay(currentState.totalBytes.toLong())
+                            } }
+                            val etaText by remember(currentState.etaSeconds) { derivedStateOf {
+                                currentState.formatETA()
+                            } }
+
+                            LoadingStatusPage(
+                                modifier = Modifier.fillMaxSize(),
+                                title = currentState.title
+                            ) {
+                                Clamp {
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        val animatedProgress = animateFractionAsState(currentState.progress)
+
+                                        LinearProgressIndicator(progress = animatedProgress)
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            if (currentState.downloadedBytes <= 0uL || currentState.totalBytes <= 0uL) {
+                                                Text(
+                                                    text = "${(currentState.progress * 100F).roundToInt()}%",
+                                                    textAlign = Justification.CENTER
+                                                )
+                                            } else {
+                                                Text(
+                                                    text = "$downloadedBytesText / $totalBytesText",
+                                                    textAlign = Justification.CENTER
+                                                )
+                                            }
+                                            HorizontalDivider(modifier = Modifier.css("spacer").weight(1F))
+                                            Text(
+                                                text = etaText.ifBlank { "00m 00s" },
+                                                textAlign = Justification.CENTER
+                                            )
+                                        }
+
+                                        if (!currentState.isPaused) {
+                                            Button(
+                                                modifier = Modifier.css("pill"),
+                                                onClick = { installViewModel.togglePause() }
+                                            ) {
+                                                ButtonContent(label = "Pause", iconName = "media-playback-pause-symbolic")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
-                }
-            }
-            else -> {
-                LoadingStatusPage(
-                    modifier = Modifier.fillMaxSize(),
-                    title = state.title
-                ) {
-                    Clamp {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            if (state.progress != null) {
-                                val animatedProgress = animateFractionAsState(state.progress)
+                    is State.Running.Installing -> {
+                        LoadingStatusPage(
+                            modifier = Modifier.fillMaxSize(),
+                            title = currentState.title
+                        ) {
+                            Clamp {
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    val animatedProgress = animateFractionAsState(currentState.progress)
 
-                                LinearProgressIndicator(progress = animatedProgress ?: 0F)
-                            }
-
-                            if (state.isDownloading) {
-                                Button(
-                                    modifier = Modifier.css("pill"),
-                                    onClick = { installViewModel.togglePause() }
-                                ) {
-                                    ButtonContent(label = "Pause", iconName = "media-playback-pause-symbolic")
+                                    LinearProgressIndicator(progress = animatedProgress)
+                                    Text(
+                                        text = "${(currentState.progress * 100F).roundToInt()}%",
+                                        textAlign = Justification.CENTER
+                                    )
                                 }
                             }
                         }
@@ -172,12 +250,10 @@ private fun LoadingStatusPage(
 }
 
 @Composable
-private fun animateFractionAsState(targetFraction: Float?): Float? {
-    var currentFraction by remember { mutableFloatStateOf(targetFraction ?: 0F) }
+private fun animateFractionAsState(targetFraction: Float): Float {
+    var currentFraction by remember { mutableFloatStateOf(targetFraction) }
 
     LaunchedEffect(targetFraction) {
-        if (targetFraction == null) return@LaunchedEffect
-
         if (targetFraction < currentFraction) {
             currentFraction = targetFraction
         }
@@ -208,5 +284,5 @@ private fun animateFractionAsState(targetFraction: Float?): Float? {
         }
     }
 
-    return if (targetFraction == null) null else currentFraction
+    return currentFraction
 }
