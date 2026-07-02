@@ -2,6 +2,15 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use crate::infrastructure::windows::wmi::BitLockerState;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum DiskType {
+    HDD,
+    SSD,
+    NVME,
+    USB,
+    Unknown
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all="camelCase")]
 pub struct Disk {
@@ -10,7 +19,8 @@ pub struct Disk {
     pub total_gb: u32,
     pub free_gb: u32,
     pub is_system_drive: bool,
-    pub is_gpt: bool
+    pub is_gpt: bool,
+    pub disk_type: DiskType
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -157,6 +157,9 @@ fun InstallScreen(
                             val etaText by remember(currentState.etaSeconds) { derivedStateOf {
                                 currentState.formatETA()
                             } }
+                            val showProgress = remember(currentState.totalBytes, downloadedBytesText, totalBytesText) {
+                                currentState.totalBytes <= 0uL || downloadedBytesText.isNullOrBlank() || totalBytesText.isNullOrBlank()
+                            }
 
                             LoadingStatusPage(
                                 modifier = Modifier.fillMaxSize(),
@@ -170,7 +173,7 @@ fun InstallScreen(
                                         Row(
                                             modifier = Modifier.fillMaxWidth()
                                         ) {
-                                            if (currentState.downloadedBytes <= 0uL || currentState.totalBytes <= 0uL) {
+                                            if (showProgress) {
                                                 Text(
                                                     text = "${(currentState.progress * 100F).roundToInt()}%",
                                                     textAlign = Justification.CENTER
@@ -183,7 +186,7 @@ fun InstallScreen(
                                             }
                                             HorizontalDivider(modifier = Modifier.css("spacer").weight(1F))
                                             Text(
-                                                text = etaText.ifBlank { "00m 00s" },
+                                                text = etaText.ifBlank { "00:00" },
                                                 textAlign = Justification.CENTER
                                             )
                                         }

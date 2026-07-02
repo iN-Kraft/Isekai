@@ -8,7 +8,7 @@ use tokio::process::Command;
 use tracing::{debug, error, info, warn};
 use windows_sys::Win32::System::SystemInformation::{FirmwareTypeUefi, GetFirmwareType};
 use crate::domain::errors::DiskError;
-use crate::domain::models::{Disk, Partition};
+use crate::domain::models::{Disk, DiskType, Partition};
 use crate::domain::traits::DiskManager;
 use crate::infrastructure::windows::wmi::{BitLockerState, MsftDisk, MsftPartition, MsftPhysicalDisk, MsftVolume};
 use crate::infrastructure::windows::utils::{PartitionUtils};
@@ -184,16 +184,34 @@ impl WindowsDiskManager {
         fw_type == FirmwareTypeUefi
     }
 
-    pub async fn is_mechanical_drive(&self, disk_id: u32) -> Result<bool, DiskError> {
-        let is_hdd = spawn_blocking_with_context(move || -> Result<bool, DiskError> {
+    pub async fn resolve_disk_type(&self, disk_id: u32) -> Result<DiskType, DiskError> {
+        let disk_type = spawn_blocking_with_context(move || -> Result<DiskType, DiskError> {
             let wmi_con = WindowsDiskManager::create_wmi_connection()?;
-            let query = format!("SELECT MediaType FROM MSFT_PhysicalDisk WHERE DeviceId = '{}'", disk_id);
+            let query = format!("SELECT MediaType, BusType FROM MSFT_PhysicalDisk WHERE DeviceId = '{}'", disk_id);
             let result: Vec<MsftPhysicalDisk> = wmi_con.raw_query(&query).map_err(|e| DiskError::WmiError(format!("PhysicalDisk Query failed: {}", e)))?;
 
-            Ok(result.first().and_then(|d| d.MediaType) == Some(3))
+            if let Some(phys) = result.first() {
+                let media_type = phys.MediaType;
+                let bus_type = phys.BusType.unwrap_or(0);
+
+                if bus_type == 7 {
+                    return Ok(DiskType::USB);
+                }else if bus_type == 17 {
+                    return Ok(DiskType::NVME);
+                } else if media_type == Some(3) {
+                    return Ok(DiskType::HDD);
+                } else if media_type == Some(4) || bus_type == 11 {
+                    return Ok(DiskType::SSD);
+                }
+            }
+            Ok(DiskType::Unknown)
         }).await.map_err(|e| DiskError::DataValidation(format!("Thread Pool crashed: {}", e)))??;
 
-        Ok(is_hdd)
+        Ok(disk_type)
+    }
+
+    pub async fn is_mechanical_drive(&self, disk_id: u32) -> Result<bool, DiskError> {
+        Ok(self.resolve_disk_type(disk_id).await? == DiskType::HDD)
     }
 
     pub async fn get_max_shrink_size(&self, drive_letter: &str) -> Result<u64, DiskError> {
@@ -323,6 +341,7 @@ impl DiskManager for WindowsDiskManager {
             let size_gb = (size_bytes / 1024 / 1024 / 1024) as u32;
             let is_sys = wmi_disk.IsSystem.unwrap_or(false) || wmi_disk.IsBoot.unwrap_or(false);
             let is_gpt = wmi_disk.PartitionStyle.unwrap_or(0) == 2;
+            let disk_type = self.resolve_disk_type(wmi_disk.Number).await.unwrap_or(DiskType::Unknown);
 
             disks.push(Disk {
                 stable_id: wmi_disk.Number.to_string(),
@@ -330,7 +349,8 @@ impl DiskManager for WindowsDiskManager {
                 total_gb: size_gb,
                 free_gb: 0,
                 is_system_drive: is_sys,
-                is_gpt
+                is_gpt,
+                disk_type
             });
         }
 

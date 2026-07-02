@@ -11,7 +11,7 @@ use crate::application::spawn_blocking_with_context;
 use crate::application::state::{WorkflowGuard, WorkflowType};
 use crate::application::workflow::ExecutableWorkflow;
 use crate::domain::errors::DiskError;
-use crate::domain::models::{Partition, WorkflowState};
+use crate::domain::models::{DiskType, Partition, WorkflowState};
 use crate::domain::traits::DiskManager;
 use crate::infrastructure::{CommandExt, NativeDiskManager};
 use crate::infrastructure::windows::autoplay::AutoPlayGuard;
@@ -202,11 +202,12 @@ impl ShrinkInstallWorkflow {
             saga.push(Compensation::DeletePartitions { disk_id: disk_num, is_uefi });
 
             telemetry!(IPCEvent::StepCopyingPayload);
-            let is_hdd = native_manager.is_mechanical_drive(disk_num).await.unwrap_or(false);
+            let disk_type = native_manager.resolve_disk_type(disk_num).await.unwrap_or(DiskType::Unknown);
+
             PayloadManager::copy_payload(
                 iso_drive_letter,
                 &payload_letter,
-                is_hdd,
+                &disk_type,
                 Some(|copied_bytes, total_bytes| {
                     let percent = ((copied_bytes as f64 / total_bytes as f64) * 100.0) as u8;
                     telemetry!(IPCEvent::ProgressCopyingPayload {

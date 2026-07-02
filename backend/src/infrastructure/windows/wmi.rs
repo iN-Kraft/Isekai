@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
 pub struct MsftPhysicalDisk {
-    pub MediaType: Option<u16>
+    pub MediaType: Option<u16>,
+    pub BusType: Option<u16>
 }
 
 #[derive(Deserialize, Debug)]

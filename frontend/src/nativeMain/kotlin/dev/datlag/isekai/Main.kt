@@ -45,7 +45,9 @@ fun main(args: Array<String>) {
     adwaitaApplication(
         applicationId = "dev.datlag.isekai",
         title = appName,
-        args = args.asIterable()
+        args = args.toMutableSet().apply {
+            removeAll(listOf("--safe-mode", "--software-render", "--debug"))
+        }
     ) {
         CompositionLocalProvider(
             LocalDI provides di,
